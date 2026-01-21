@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stateful-abac-sdk"
+version = "0.1.0"
+description = "Async Python SDK for Stateful ABAC Policy Engine"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [
+    { name = "Myron Gourlis", email = "myrgourlis@gmail.com" },
+]
+dependencies = [
+    "httpx>=0.23.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+db = [
+    "stateful-abac-common",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "geoalchemy2>=0.14.0",
+    "redis>=5.0.0",
+    "python-keycloak>=3.0.0",
+    "pyproj",
+    "python-jose[cryptography]",
+    "apscheduler>=3.10.0",
+    "shapely>=2.0.0",
+    "passlib[bcrypt]>=1.7.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stateful_abac_sdk"]

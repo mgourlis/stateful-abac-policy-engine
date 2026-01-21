@@ -1,0 +1,110 @@
+{
+    "realm": {
+        "name": "DemoRealm",
+        "description": "Example realm demonstrating all features",
+        "keycloak_config": {
+            "server_url": "https://keycloak.example.com",
+            "keycloak_realm": "demo-realm",
+            "client_id": "auth-client",
+            "client_secret": "secret",
+            "sync_groups": true
+        }
+    },
+    "resource_types": [
+        {
+            "name": "Document",
+            "is_public": false
+        },
+        {
+            "name": "Zone",
+            "is_public": true
+        }
+    ],
+    "actions": [
+        "view",
+        "edit",
+        "delete",
+        "enter"
+    ],
+    "roles": [
+        {
+            "name": "editor",
+            "attributes": {
+                "access_level": 2
+            }
+        },
+        {
+            "name": "viewer",
+            "attributes": {
+                "access_level": 1
+            }
+        }
+    ],
+    "principals": [
+        {
+            "username": "user_alice",
+            "attributes": {
+                "department": "IT",
+                "clearance": "high"
+            },
+            "roles": [
+                "editor"
+            ]
+        },
+        {
+            "username": "user_bob",
+            "attributes": {
+                "department": "HR"
+            },
+            "roles": [
+                "viewer"
+            ]
+        }
+    ],
+    "resources": [
+        {
+            "external_id": "doc-123",
+            "type": "Document",
+            "attributes": {
+                "classification": "confidential",
+                "project": "apollo"
+            }
+        },
+        {
+            "external_id": "hq_zone",
+            "type": "Zone",
+            "attributes": {
+                "name": "Headquarters"
+            },
+            "geometry": "SRID=3857;POLYGON((0 0, 0 100, 100 100, 100 0, 0 0))"
+        }
+    ],
+    "acls": [
+        {
+            "resource_type": "Document",
+            "action": "view",
+            "role": "viewer"
+        },
+        {
+            "resource_type": "Document",
+            "action": "edit",
+            "role": "editor",
+            "conditions": {
+                "op": "eq",
+                "attr": "classification",
+                "val": "confidential"
+            }
+        },
+        {
+            "resource_type": "Zone",
+            "action": "enter",
+            "role": "viewer",
+            "conditions": {
+                "op": "st_dwithin",
+                "attr": "geometry",
+                "val": "$context.location",
+                "args": 1000
+            }
+        }
+    ]
+}

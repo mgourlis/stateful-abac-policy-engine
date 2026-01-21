@@ -1,0 +1,181 @@
+{
+    "realm": {
+        "name": "Example_Complex_Realm",
+        "description": "A comprehensive example demonstrating standard RBAC, Spatial Geofencing, and Attribute-Based Access Control (ABAC).",
+        "keycloak_config": {
+            "server_url": "https://auth.example.com",
+            "keycloak_realm": "enterprise-v1",
+            "client_id": "service-client",
+            "client_secret": "secret",
+            "verify_ssl": true,
+            "sync_cron": "0 2 * * *",
+            "sync_groups": true,
+            "settings": {
+                "token_lifespan": 3600
+            }
+        }
+    },
+    "resource_types": [
+        {
+            "name": "facility",
+            "is_public": false
+        },
+        {
+            "name": "document",
+            "is_public": false
+        },
+        {
+            "name": "public_announcement",
+            "is_public": true
+        }
+    ],
+    "actions": [
+        "view",
+        "edit",
+        "enter",
+        "approve"
+    ],
+    "roles": [
+        {
+            "name": "admin",
+            "attributes": {
+                "level": 10
+            }
+        },
+        {
+            "name": "field_agent",
+            "attributes": {
+                "department": "operations"
+            }
+        },
+        {
+            "name": "auditor"
+        }
+    ],
+    "principals": [
+        {
+            "username": "agent_007",
+            "attributes": {
+                "clearance": 5,
+                "region": "eu-south"
+            },
+            "roles": [
+                "field_agent"
+            ]
+        },
+        {
+            "username": "sys_admin",
+            "attributes": {
+                "clearance": 10
+            },
+            "roles": [
+                "admin"
+            ]
+        }
+    ],
+    "resources": [
+        {
+            "external_id": "FAC-HQ",
+            "type": "facility",
+            "attributes": {
+                "status": "active",
+                "security_level": "high",
+                "region": "eu-south"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    23.7275,
+                    37.9838
+                ]
+            }
+        },
+        {
+            "external_id": "DOC-SECRET-PLANS",
+            "type": "document",
+            "attributes": {
+                "classification": "top_secret",
+                "department": "operations"
+            }
+        },
+        {
+            "external_id": "DOC-PUBLIC-GUIDE",
+            "type": "document",
+            "attributes": {
+                "classification": "public"
+            }
+        }
+    ],
+    "acls": [
+        {
+            "_comment": "Admin has full access to everything",
+            "resource_type": "facility",
+            "action": "enter",
+            "role": "admin"
+        },
+        {
+            "_comment": "Anonymous access to specific public doc via ACL (even if type is private)",
+            "resource_type": "document",
+            "action": "view",
+            "principal_id": 0,
+            "resource_external_id": "DOC-PUBLIC-GUIDE"
+        },
+        {
+            "_comment": "Field Agents can enter facilities if within 1km AND active status",
+            "resource_type": "facility",
+            "action": "enter",
+            "role": "field_agent",
+            "conditions": {
+                "op": "and",
+                "conditions": [
+                    {
+                        "op": "=",
+                        "source": "resource",
+                        "attr": "status",
+                        "val": "active"
+                    },
+                    {
+                        "op": "st_dwithin",
+                        "attr": "geometry",
+                        "val": "$context.location",
+                        "args": 1000
+                    }
+                ]
+            }
+        },
+        {
+            "_comment": "Complex Logic: View document if (Public) OR (Agent Region matches AND Clearance >= Doc Classification)",
+            "resource_type": "document",
+            "action": "view",
+            "role": "field_agent",
+            "conditions": {
+                "op": "or",
+                "conditions": [
+                    {
+                        "op": "=",
+                        "source": "resource",
+                        "attr": "classification",
+                        "val": "public"
+                    },
+                    {
+                        "op": "and",
+                        "conditions": [
+                            {
+                                "op": "=",
+                                "source": "principal",
+                                "attr": "region",
+                                "val": "$resource.attributes.region"
+                            },
+                            {
+                                "op": ">=",
+                                "source": "principal",
+                                "attr": "clearance",
+                                "val": 5
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    ]
+}

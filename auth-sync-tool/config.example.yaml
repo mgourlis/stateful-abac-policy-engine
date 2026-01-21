@@ -1,0 +1,212 @@
+# yaml-language-server: $schema=config.schema.json
+# Stateful ABAC Policy Engine Sync Tool - Example Configuration
+# 
+# This configuration file demonstrates how to set up the sync tool
+# to generate Stateful ABAC Policy Engine manifests from an external database.
+
+# Database connection for source data
+database:
+  type: postgresql
+  host: localhost
+  port: 5432
+  database: my_application
+  user: app_user
+  password: "${DB_PASSWORD}"  # Uses environment variable
+
+# Realm configuration
+realm:
+  name: MyAppRealm
+  description: "Security realm for MyApplication"
+  
+  # Optional: Keycloak integration for authentication
+  # If sync_groups is true, roles and principals queries are skipped
+  # keycloak_config:
+  #   server_url: "https://sso.example.com"
+  #   keycloak_realm: "my-app"
+  #   client_id: "auth-client"
+  #   client_secret: "${KC_SECRET}"
+  #   sync_groups: true
+  #   sync_cron: "0 */6 * * *"
+  #   public_key: "${KC_PUBLIC_KEY}"
+  #   algorithm: "RS256"
+
+# Actions to define in the realm
+actions:
+  - view
+  - edit
+  - delete
+  - create
+
+# Roles query - fetch roles from database
+# Skipped if keycloak_config.sync_groups is true
+roles:
+  query: |
+    SELECT 
+      name,
+      metadata::jsonb as attributes
+    FROM app_roles
+    WHERE is_active = true
+  mappings:
+    name: name
+    attributes: attributes
+
+# Principals query - fetch users with their roles
+# Skipped if keycloak_config is set (Keycloak manages users)
+principals:
+  query: |
+    SELECT 
+      u.username,
+      u.profile_data::jsonb as attributes,
+      ARRAY_AGG(r.name) FILTER (WHERE r.name IS NOT NULL) as roles
+    FROM users u
+    LEFT JOIN user_roles ur ON u.id = ur.user_id
+    LEFT JOIN app_roles r ON ur.role_id = r.id
+    WHERE u.is_active = true
+    GROUP BY u.id, u.username, u.profile_data
+  mappings:
+    username: username
+    attributes: attributes
+    roles: roles
+
+# Resource types with their configurations
+resource_types:
+  # Private resource type with role-based access from query
+  - name: document
+    is_public: false
+    
+    # Default ACLs for ALL resources of this type
+    acls:
+      - action: view
+        role: viewer
+      - action: edit
+        role: editor
+      - action: delete
+        role: admin
+    
+    # Fetch resources from database
+    resources:
+      query: |
+        SELECT 
+          d.id::text as external_id,
+          jsonb_build_object(
+            'title', d.title,
+            'status', d.status,
+            'classification', d.classification,
+            'owner', d.owner_username
+          ) as attributes,
+          ST_AsGeoJSON(d.location)::json as geometry
+        FROM documents d
+        WHERE d.deleted_at IS NULL
+      mappings:
+        external_id: external_id
+        attributes: attributes
+        geometry: geometry
+        srid: 4326
+
+  # Public resource type - accessible to everyone
+  - name: public_announcement
+    is_public: true
+    
+    resources:
+      query: |
+        SELECT 
+          id::text as external_id,
+          jsonb_build_object('title', title, 'content', content) as attributes
+        FROM announcements
+        WHERE published = true
+
+  # Resource type with manual resource definitions and advanced ACLs
+  - name: facility
+    is_public: false
+    
+    # Type-level ACLs with conditions
+    acls:
+      # Admins have full access to all facilities
+      - action: enter
+        role: admin
+      
+      # Field agents can only enter active facilities within 1km
+      - action: enter
+        role: field_agent
+        conditions:
+          op: and
+          conditions:
+            - op: "="
+              attr: status
+              source: resource
+              val: active
+            - op: st_dwithin
+              attr: geometry
+              val: "$context.location"
+              args: 1000
+    
+    # Manual resource definitions with per-resource ACLs
+    resource_list:
+      - external_id: "FAC-HQ"
+        attributes:
+          name: "Headquarters"
+          status: active
+          security_level: high
+        geometry:
+          type: Point
+          coordinates: [23.7275, 37.9838]
+        srid: 4326
+        # ACLs specific to this resource
+        acls:
+          - action: enter
+            principal: security_officer
+          - action: view
+            role: viewer
+            conditions:
+              op: ">="
+              attr: clearance
+              source: principal
+              val: 5
+      
+      - external_id: "FAC-WAREHOUSE"
+        attributes:
+          name: "Warehouse"
+          status: active
+          security_level: low
+        geometry:
+          type: Point
+          coordinates: [23.7500, 37.9900]
+        acls:
+          - action: enter
+            role: warehouse_worker
+          # Anonymous access to view this specific facility
+          - action: view
+            principal_id: 0
+
+  # Resource type with complex nested conditions
+  - name: classified_document
+    is_public: false
+    
+    acls:
+      # Complex: View if (Public) OR (Region matches AND Clearance >= 5)
+      - action: view
+        role: field_agent
+        conditions:
+          op: or
+          conditions:
+            - op: "="
+              attr: classification
+              source: resource
+              val: public
+            - op: and
+              conditions:
+                - op: "="
+                  attr: region
+                  source: principal
+                  val: "$resource.attributes.region"
+                - op: ">="
+                  attr: clearance
+                  source: principal
+                  val: 5
+    
+    resource_list:
+      - external_id: "DOC-SECRET-001"
+        attributes:
+          title: "Secret Document"
+          classification: secret
+          region: eu-south

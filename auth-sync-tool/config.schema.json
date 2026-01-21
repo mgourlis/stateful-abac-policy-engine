@@ -1,0 +1,392 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Stateful ABAC Policy Engine Sync Tool Configuration",
+    "description": "Configuration schema for the Stateful ABAC Policy Engine Sync Tool",
+    "type": "object",
+    "required": [
+        "database",
+        "realm"
+    ],
+    "properties": {
+        "database": {
+            "type": "object",
+            "description": "Database connection configuration",
+            "required": [
+                "database",
+                "user"
+            ],
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "postgresql"
+                    ],
+                    "default": "postgresql",
+                    "description": "Database type"
+                },
+                "host": {
+                    "type": "string",
+                    "default": "localhost",
+                    "description": "Database host"
+                },
+                "port": {
+                    "type": "integer",
+                    "default": 5432,
+                    "description": "Database port"
+                },
+                "database": {
+                    "type": "string",
+                    "description": "Database name"
+                },
+                "user": {
+                    "type": "string",
+                    "description": "Database user"
+                },
+                "password": {
+                    "type": "string",
+                    "description": "Database password (supports ${ENV_VAR} syntax)"
+                }
+            }
+        },
+        "realm": {
+            "type": "object",
+            "description": "Realm configuration",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Realm name"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Realm description"
+                },
+                "keycloak_config": {
+                    "type": "object",
+                    "description": "Keycloak integration settings",
+                    "required": [
+                        "server_url",
+                        "keycloak_realm",
+                        "client_id"
+                    ],
+                    "properties": {
+                        "server_url": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "Keycloak server URL"
+                        },
+                        "keycloak_realm": {
+                            "type": "string",
+                            "description": "Keycloak realm name"
+                        },
+                        "client_id": {
+                            "type": "string",
+                            "description": "Client ID for authentication"
+                        },
+                        "client_secret": {
+                            "type": "string",
+                            "description": "Client secret (supports ${ENV_VAR})"
+                        },
+                        "verify_ssl": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Verify SSL certificates"
+                        },
+                        "sync_cron": {
+                            "type": "string",
+                            "description": "Cron expression for sync schedule"
+                        },
+                        "sync_groups": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Sync Keycloak groups as roles"
+                        },
+                        "public_key": {
+                            "type": "string",
+                            "description": "RSA public key for token verification"
+                        },
+                        "algorithm": {
+                            "type": "string",
+                            "default": "RS256",
+                            "description": "JWT algorithm"
+                        },
+                        "settings": {
+                            "type": "object",
+                            "description": "Additional settings"
+                        }
+                    }
+                }
+            }
+        },
+        "actions": {
+            "type": "array",
+            "description": "List of action names",
+            "items": {
+                "type": "string"
+            }
+        },
+        "roles": {
+            "$ref": "#/definitions/QueryConfig",
+            "description": "Query to fetch roles (skipped if keycloak sync_groups=true)"
+        },
+        "principals": {
+            "$ref": "#/definitions/QueryConfig",
+            "description": "Query to fetch principals (skipped if keycloak config exists)"
+        },
+        "resource_types": {
+            "type": "array",
+            "description": "Resource type definitions",
+            "items": {
+                "$ref": "#/definitions/ResourceType"
+            }
+        }
+    },
+    "definitions": {
+        "QueryConfig": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "SQL query to execute"
+                },
+                "mappings": {
+                    "$ref": "#/definitions/ColumnMappings"
+                }
+            }
+        },
+        "ColumnMappings": {
+            "type": "object",
+            "description": "Column name mappings for query results",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                },
+                "attributes": {
+                    "type": "string"
+                },
+                "roles": {
+                    "type": "string"
+                },
+                "external_id": {
+                    "type": "string"
+                },
+                "geometry": {
+                    "type": "string"
+                },
+                "srid": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ResourceType": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Resource type name"
+                },
+                "is_public": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Allow anonymous access"
+                },
+                "acls": {
+                    "type": "array",
+                    "description": "Default ACLs for this resource type",
+                    "items": {
+                        "$ref": "#/definitions/ACL"
+                    }
+                },
+                "resources": {
+                    "type": "object",
+                    "description": "Database query to fetch resources",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "SQL query to fetch resources"
+                        },
+                        "mappings": {
+                            "$ref": "#/definitions/ColumnMappings"
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ]
+                },
+                "resource_list": {
+                    "type": "array",
+                    "description": "Manually defined resources with optional ACLs",
+                    "items": {
+                        "$ref": "#/definitions/Resource"
+                    }
+                }
+            }
+        },
+        "Resource": {
+            "type": "object",
+            "description": "Manual resource definition with optional ACLs",
+            "required": [
+                "external_id"
+            ],
+            "properties": {
+                "external_id": {
+                    "type": "string",
+                    "description": "Unique external identifier"
+                },
+                "attributes": {
+                    "type": "object",
+                    "description": "Resource attributes"
+                },
+                "geometry": {
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "description": "WKT or EWKT geometry"
+                        },
+                        {
+                            "type": "object",
+                            "description": "GeoJSON geometry"
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "type": "number"
+                            },
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "description": "[lng, lat]"
+                        }
+                    ],
+                    "description": "Resource geometry"
+                },
+                "srid": {
+                    "type": "integer",
+                    "description": "Geometry SRID (default 4326)"
+                },
+                "acls": {
+                    "type": "array",
+                    "description": "ACLs specific to this resource",
+                    "items": {
+                        "$ref": "#/definitions/ACL"
+                    }
+                }
+            }
+        },
+        "ACL": {
+            "type": "object",
+            "required": [
+                "action"
+            ],
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Action name"
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Role name (mutually exclusive with principal)"
+                },
+                "principal": {
+                    "type": "string",
+                    "description": "Username (mutually exclusive with role)"
+                },
+                "principal_id": {
+                    "type": "integer",
+                    "description": "Principal ID (0 for anonymous)"
+                },
+                "resource_external_id": {
+                    "type": "string",
+                    "description": "Specific resource external ID (for type-level ACLs)"
+                },
+                "conditions": {
+                    "$ref": "#/definitions/Condition"
+                }
+            }
+        },
+        "Condition": {
+            "type": "object",
+            "oneOf": [
+                {
+                    "properties": {
+                        "op": {
+                            "type": "string",
+                            "enum": [
+                                "and",
+                                "or"
+                            ],
+                            "description": "Logical operator"
+                        },
+                        "conditions": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Condition"
+                            }
+                        }
+                    },
+                    "required": [
+                        "op",
+                        "conditions"
+                    ]
+                },
+                {
+                    "properties": {
+                        "op": {
+                            "type": "string",
+                            "enum": [
+                                "=",
+                                "!=",
+                                "<",
+                                ">",
+                                "<=",
+                                ">=",
+                                "in",
+                                "st_dwithin",
+                                "st_contains",
+                                "st_within",
+                                "st_intersects",
+                                "st_covers"
+                            ],
+                            "description": "Comparison/Spatial operator"
+                        },
+                        "attr": {
+                            "type": "string",
+                            "description": "Attribute name"
+                        },
+                        "val": {
+                            "description": "Value to compare against (supports $context.*, $resource.*, $principal.*)"
+                        },
+                        "source": {
+                            "type": "string",
+                            "enum": [
+                                "resource",
+                                "principal",
+                                "context"
+                            ],
+                            "default": "resource",
+                            "description": "Attribute source"
+                        },
+                        "args": {
+                            "description": "Additional arguments (e.g., distance for st_dwithin)"
+                        }
+                    },
+                    "required": [
+                        "op",
+                        "attr",
+                        "val"
+                    ]
+                }
+            ]
+        }
+    }
+}

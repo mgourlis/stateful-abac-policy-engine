@@ -1,0 +1,78 @@
+version: '3.8'
+services:
+  app:
+    profiles: [ "app" ]
+    build: .
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - STATEFUL_ABAC_DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-123456}@db:5432/${POSTGRES_DB:-demo_auth_db}
+      - STATEFUL_ABAC_REDIS_URL=redis://cache:6379/${REDIS_DB:-0}
+      - STATEFUL_ABAC_JWT_SECRET_KEY=${STATEFUL_ABAC_JWT_SECRET_KEY:-changeme}
+      - STATEFUL_ABAC_JWT_ALGORITHM=${STATEFUL_ABAC_JWT_ALGORITHM:-HS256}
+      - STATEFUL_ABAC_TESTING=${STATEFUL_ABAC_TESTING:-false}
+      - STATEFUL_ABAC_ENABLE_SCHEDULER=${STATEFUL_ABAC_ENABLE_SCHEDULER:-true}
+      - STATEFUL_ABAC_POSTGRES_POOL_SIZE=${STATEFUL_ABAC_POSTGRES_POOL_SIZE:-50}
+      - STATEFUL_ABAC_POSTGRES_MAX_OVERFLOW=${STATEFUL_ABAC_POSTGRES_MAX_OVERFLOW:-50}
+      - STATEFUL_ABAC_POSTGRES_POOL_RECYCLE=${STATEFUL_ABAC_POSTGRES_POOL_RECYCLE:-300}
+      - STATEFUL_ABAC_POSTGRES_POOL_TIMEOUT=${STATEFUL_ABAC_POSTGRES_POOL_TIMEOUT:-30}
+      - STATEFUL_ABAC_POSTGRES_POOL_PRE_PING=${STATEFUL_ABAC_POSTGRES_POOL_PRE_PING:-true}
+    depends_on:
+      - db
+      - cache
+    volumes:
+      - ./app:/app/app # Hot reload support
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  app-bundled:
+    profiles: [ "app-bundled" ]
+    build:
+      context: .
+      dockerfile: Dockerfile.withui
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - STATEFUL_ABAC_DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-123456}@db:5432/${POSTGRES_DB:-demo_auth_db}
+      - STATEFUL_ABAC_REDIS_URL=redis://cache:6379/${REDIS_DB:-0}
+      - STATEFUL_ABAC_JWT_SECRET_KEY=${STATEFUL_ABAC_JWT_SECRET_KEY:-changeme}
+      - STATEFUL_ABAC_JWT_ALGORITHM=${STATEFUL_ABAC_JWT_ALGORITHM:-HS256}
+      - STATEFUL_ABAC_TESTING=${STATEFUL_ABAC_TESTING:-false}
+      - STATEFUL_ABAC_ENABLE_SCHEDULER=${STATEFUL_ABAC_ENABLE_SCHEDULER:-true}
+      - STATEFUL_ABAC_ENABLE_UI=true
+    depends_on:
+      - db
+      - cache
+
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      POSTGRES_DB: ${POSTGRES_DB:-demo_auth_db}
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  cache:
+    image: redis:alpine
+    ports:
+      - "${REDIS_PORT:-6378}:6379"
+
+  # Optional: UI development server (run with --profile ui)
+  ui:
+    profiles: [ "ui" ]
+    image: node:20-alpine
+    working_dir: /app
+    ports:
+      - "${UI_PORT:-5173}:5173"
+    volumes:
+      - ./ui:/app
+    environment:
+      - VITE_API_URL=http://app:8000
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - app
+
+volumes:
+  postgres_data:

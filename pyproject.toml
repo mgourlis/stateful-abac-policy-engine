@@ -1,0 +1,40 @@
+[tool.poetry]
+name = "stateful-abac-policy-engine"
+version = "0.1.0"
+description = ""
+authors = ["Myron Gourlis <myron.gourlis@enomix.gr>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.124.4"
+uvicorn = {extras = ["standard"], version = "^0.38.0"}
+sqlalchemy = "^2.0.45"
+asyncpg = "^0.31.0"
+geoalchemy2 = "^0.18.1"
+pydantic-settings = "^2.12.0"
+redis = "^7.1.0"
+alembic = "^1.17.2"
+python-jose = {extras = ["cryptography"], version = "^3.5.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+python-multipart = "^0.0.20"
+python-keycloak = "^5.8.1"
+apscheduler = "^3.11.1"
+shapely = "^2.1.2"
+pyproj = "^3.7.2"
+psycopg = {extras = ["binary"], version = "^3.3.2"}
+pyclean = "^3.4.0"
+stateful-abac-common = {path = "./common", develop = true}
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.2"
+httpx = "^0.28.1"
+pytest-asyncio = "^1.3.0"
+pytest-ordering = "^0.6"
+pytest-cov = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

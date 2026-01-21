@@ -1,0 +1,23 @@
+# Minimal test configuration (no database required)
+database:
+  type: postgresql
+  host: localhost
+  port: 5432
+  database: testdb
+  user: testuser
+  password: testpass
+
+realm:
+  name: TestRealm
+  description: "Test realm for validation"
+
+actions:
+  - view
+  - edit
+
+resource_types:
+  - name: document
+    is_public: false
+    acls:
+      - action: view
+        role: reader

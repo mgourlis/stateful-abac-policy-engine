@@ -5,7 +5,7 @@ __pycache__
 .vscode
 *.pyc
 .coverage
-fws-auth-sync-tool/system-configs/*
+auth-sync-tool/system-configs/*
 
 manifest.json
 load_manifest.py

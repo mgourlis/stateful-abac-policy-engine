@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "stateful-abac-common"
+version = "0.1.0"
+description = "Common utilities and services for Stateful ABAC Policy Engine"
+authors = ["Myron Gourlis <myrgourlis@gmail.com>"]
+packages = [{include = "common", from = ".."}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+# Use flexible versions to avoid conflicts with parent project
+sqlalchemy = {extras = ["asyncio"], version = ">=2.0.0"}
+asyncpg = ">=0.29.0"
+geoalchemy2 = ">=0.14.0"
+redis = ">=5.0.0"
+pydantic = ">=2.0.0"
+pydantic-settings = ">=2.0.0"
+python-jose = {extras = ["cryptography"], version = ">=3.3.0"}
+passlib = {extras = ["bcrypt"], version = ">=1.7.4"}
+shapely = ">=2.0.0"
+pyproj = ">=3.5.0"
+python-keycloak = ">=3.0.0"
+apscheduler = ">=3.10.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
