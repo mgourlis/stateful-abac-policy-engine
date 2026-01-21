@@ -1,0 +1,14 @@
+__pycache__
+.env
+.venv
+.idea
+.vscode
+*.pyc
+.coverage
+fws-auth-sync-tool/system-configs/*
+
+manifest.json
+load_manifest.py
+test_check_access.py
+
+

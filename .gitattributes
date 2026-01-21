@@ -1,0 +1,5 @@
+# Set default behavior to handle line endings automatically.
+* text=auto
+# Explicitly declare scripts as LF so they never break in Docker.
+*.sh text eol=lf
+Dockerfile text eol=lf
