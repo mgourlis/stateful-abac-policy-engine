@@ -674,3 +674,101 @@ class AuthService:
         )
         
         return result, audit
+
+    async def get_authorization_conditions(
+        self,
+        realm_name: str,
+        principal: Union[Principal, AnonymousPrincipal],
+        resource_type_name: str,
+        action_name: str,
+        role_names: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get authorization conditions as JSON DSL for SearchQuery conversion.
+        
+        This enables single-query authorization: the returned conditions can be
+        converted to a SearchQuery and merged with user queries using
+        SearchQuery.merge() for optimal database performance.
+        
+        Args:
+            realm_name: Name of the realm
+            principal: The principal (user) making the request
+            resource_type_name: Name of the resource type
+            action_name: Action being performed (e.g., "read", "update")
+            role_names: Optional role names to filter by
+            
+        Returns:
+            Dict with:
+                - filter_type: 'granted_all', 'denied_all', or 'conditions'
+                - conditions_dsl: JSON condition DSL (or None)
+                - external_ids: List of granted resource external IDs (or None)
+                - has_context_refs: Whether conditions reference $context.* or $principal.*
+        """
+        # Get Realm Map (cached)
+        realm_map = await CacheService.get_realm_map(realm_name, db_session=self.session)
+        realm_id = CacheService.get_realm_id(realm_map)
+        
+        # Resolve resource type and action IDs
+        try:
+            type_id = int(realm_map[f"type:{resource_type_name}"])
+            action_id = int(realm_map[f"action:{action_name}"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError(f"Unknown resource type or action: {resource_type_name}/{action_name}")
+        
+        # Resolve roles
+        role_ids = []
+        if role_names:
+            for r_name in role_names:
+                role_id = realm_map.get(f"role:{r_name}")
+                if role_id:
+                    role_ids.append(int(role_id))
+            # Filter to roles the principal actually has
+            if role_ids and not isinstance(principal, AnonymousPrincipal):
+                stmt = select(PrincipalRoles.role_id).where(
+                    PrincipalRoles.principal_id == principal.id,
+                    PrincipalRoles.role_id.in_(role_ids)
+                )
+                result = await self.session.execute(stmt)
+                role_ids = list(result.scalars().all())
+        else:
+            # Get all roles for the principal
+            if not isinstance(principal, AnonymousPrincipal):
+                stmt = select(PrincipalRoles.role_id).where(
+                    PrincipalRoles.principal_id == principal.id
+                )
+                result = await self.session.execute(stmt)
+                role_ids = list(result.scalars().all())
+        
+        principal_id = principal.id if not isinstance(principal, AnonymousPrincipal) else 0
+        
+        # Call the PostgreSQL function
+        query = text("""
+            SELECT filter_type, conditions_dsl, external_ids, has_context_refs
+            FROM get_authorization_conditions(:realm_id, :principal_id, :role_ids, :type_id, :action_id)
+        """)
+        
+        result = await self.session.execute(query, {
+            "realm_id": realm_id,
+            "principal_id": principal_id,
+            "role_ids": role_ids,
+            "type_id": type_id,
+            "action_id": action_id
+        })
+        
+        row = result.fetchone()
+        
+        if row is None:
+            # No result from function - treat as denied
+            return {
+                "filter_type": "denied_all",
+                "conditions_dsl": None,
+                "external_ids": None,
+                "has_context_refs": False
+            }
+        
+        return {
+            "filter_type": row.filter_type,
+            "conditions_dsl": row.conditions_dsl,
+            "external_ids": list(row.external_ids) if row.external_ids else None,
+            "has_context_refs": row.has_context_refs
+        }

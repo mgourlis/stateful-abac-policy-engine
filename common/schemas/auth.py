@@ -49,3 +49,27 @@ class PermittedActionsResponseItem(BaseModel):
 class GetPermittedActionsResponse(BaseModel):
     """Response containing permitted actions per resource."""
     results: List[PermittedActionsResponseItem]
+
+
+# ============================================================================
+# Get Authorization Conditions - returns JSON DSL for SearchQuery conversion
+# ============================================================================
+class GetAuthorizationConditionsRequest(BaseModel):
+    """Request to get authorization conditions as JSON DSL."""
+    realm_name: str
+    resource_type_name: str
+    action_name: str
+    role_names: Optional[List[str]] = None
+
+
+class AuthorizationConditionsResponse(BaseModel):
+    """
+    Response containing authorization conditions as JSON DSL.
+    
+    This can be converted to SearchQuery and merged with user queries
+    for single-query authorization.
+    """
+    filter_type: str  # 'granted_all', 'denied_all', 'conditions'
+    conditions_dsl: Optional[Dict[str, Any]] = None
+    external_ids: Optional[List[str]] = None
+    has_context_refs: bool = False

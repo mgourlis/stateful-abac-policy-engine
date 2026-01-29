@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from ..models import (
         Realm, ResourceType, Action, Principal, Role, Resource, ACL,
         CheckAccessItem, RealmKeycloakConfig, GetPermittedActionsItem,
-        GetPermittedActionsResponse
+        GetPermittedActionsResponse, AuthorizationConditionsResponse
     )
     from .managers.auth import AccessResponse
 
@@ -460,5 +460,33 @@ class IAuthManager(ABC):
             
         Returns:
             GetPermittedActionsResponse with actions permitted per resource.
+        """
+        pass
+
+    @abstractmethod
+    async def get_authorization_conditions(
+        self,
+        resource_type_name: str,
+        action_name: str,
+        role_names: Optional[List[str]] = None
+    ) -> "AuthorizationConditionsResponse":
+        """
+        Get authorization conditions as JSON DSL for SearchQuery conversion.
+        
+        This enables single-query authorization: the returned conditions can be
+        converted to a SearchQuery using ABACConditionConverter and merged with
+        user queries using SearchQuery.merge() for optimal database performance.
+        
+        Args:
+            resource_type_name: Name of the resource type.
+            action_name: Action being performed (e.g., "read", "update").
+            role_names: Optional list of role names to check against.
+            
+        Returns:
+            AuthorizationConditionsResponse with:
+                - filter_type: 'granted_all', 'denied_all', or 'conditions'
+                - conditions_dsl: JSON condition DSL compatible with search_query_dsl
+                - external_ids: List of specifically granted resource external IDs
+                - has_context_refs: Whether conditions reference $context.* or $principal.*
         """
         pass

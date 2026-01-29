@@ -105,3 +105,19 @@ class PermittedActionsResponseItem(BaseModel):
 class GetPermittedActionsResponse(BaseModel):
     """Response container for get_permitted_actions."""
     results: List[PermittedActionsResponseItem]
+
+
+# ============================================================================
+# Get Authorization Conditions - returns JSON DSL for SearchQuery conversion
+# ============================================================================
+class AuthorizationConditionsResponse(BaseModel):
+    """
+    Response containing authorization conditions as JSON DSL.
+    
+    This can be converted to SearchQuery and merged with user queries
+    for single-query authorization using SearchQuery.merge().
+    """
+    filter_type: str  # 'granted_all', 'denied_all', 'conditions'
+    conditions_dsl: Optional[Dict[str, Any]] = None
+    external_ids: Optional[List[str]] = None
+    has_context_refs: bool = False
