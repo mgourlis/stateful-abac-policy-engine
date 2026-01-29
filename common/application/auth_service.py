@@ -1115,7 +1115,9 @@ class AuthService:
             
             for cond in conditions:
                 if self._is_simple_external_id_eq(cond):
-                    external_id_values.append(cond.get('val'))
+                    # Cast to string if not already
+                    val = cond.get('val')
+                    external_id_values.append(str(val) if not isinstance(val, str) else val)
                 else:
                     # Recursively process non-simple conditions
                     other_conditions.append(self._merge_external_id_conditions(cond))
@@ -1132,7 +1134,7 @@ class AuthService:
                     'val': external_id_values
                 })
             elif len(external_id_values) == 1:
-                # Keep single equality as-is
+                # Keep single equality as-is (already cast to string above)
                 result_conditions.append({
                     'op': '=',
                     'source': 'resource',
@@ -1161,6 +1163,7 @@ class AuthService:
         Check if a node is a simple external_id = X condition.
         
         Returns True for: {"op": "=", "source": "resource", "attr": "external_id", "val": "..."}
+        Also accepts integer/numeric values which will be cast to string during merge.
         """
         if not isinstance(node, dict):
             return False
@@ -1168,11 +1171,13 @@ class AuthService:
         op = node.get('op', '').lower()
         source = node.get('source', 'resource')
         attr = node.get('attr', '')
+        val = node.get('val')
         
         return (
             op in ('=', '==') and
             source == 'resource' and
             attr == 'external_id' and
             'val' in node and
-            isinstance(node.get('val'), str)  # Simple string value, not a reference
+            isinstance(val, (str, int, float)) and  # Primitive value, not a reference or complex type
+            not (isinstance(val, str) and val.startswith('$'))  # Not a reference
         )
