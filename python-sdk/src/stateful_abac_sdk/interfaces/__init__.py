@@ -468,6 +468,7 @@ class IAuthManager(ABC):
         self,
         resource_type_name: str,
         action_name: str,
+        auth_context: Optional[Dict[str, Any]] = None,
         role_names: Optional[List[str]] = None
     ) -> "AuthorizationConditionsResponse":
         """
@@ -477,16 +478,20 @@ class IAuthManager(ABC):
         converted to a SearchQuery using ABACConditionConverter and merged with
         user queries using SearchQuery.merge() for optimal database performance.
         
+        Context references ($context.* and $principal.*) are resolved server-side
+        before returning, so the conditions_dsl is ready for direct conversion.
+        
         Args:
             resource_type_name: Name of the resource type.
             action_name: Action being performed (e.g., "read", "update").
+            auth_context: Optional runtime context for $context.* resolution.
             role_names: Optional list of role names to check against.
             
         Returns:
             AuthorizationConditionsResponse with:
                 - filter_type: 'granted_all', 'denied_all', or 'conditions'
-                - conditions_dsl: JSON condition DSL compatible with search_query_dsl
+                - conditions_dsl: JSON condition DSL with resolved context references
                 - external_ids: List of specifically granted resource external IDs
-                - has_context_refs: Whether conditions reference $context.* or $principal.*
+                - has_context_refs: Whether conditions originally had context references
         """
         pass

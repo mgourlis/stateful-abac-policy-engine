@@ -14,9 +14,9 @@ The core differentiator is the **JIT (Just-In-Time) Policy Compiler**.
 - **Dynamic Rules**: Policies are stored as JSONB in the `acl` table.
 - **SQL Compilation**: A trigger (`trg_compile_acl_conditions`) automatically parses JSON rules into raw SQL logic upon insertion using a recursive PL/pgSQL compiler.
 - **Supported Logic**:
-  - **Logical Operators**: Nested `AND`, `OR` groups.
+  - **Logical Operators**: Nested `AND`, `OR` groups, plus `NOT` for negation.
   - **Comparators**: `=`, `!=`, `>`, `>=`, `<`, `<=`.
-  - **Set Operations**: `IN` operator (e.g., `status IN ['active', 'pending']`).
+  - **Set Operations**: `IN`, `NOT_IN` (e.g., `status NOT IN ['deleted', 'archived']`), `ALL` (array containment).
   - **Type Safety**: Automatic type casting for `::numeric`, `::boolean`, and `::text`.
 
 ### 2.2. Context-Aware Authorization
@@ -35,6 +35,23 @@ Policies can reference dynamic runtime context, not just static attributes.
   }
   ```
   *Compiled SQL*: `(resource.attributes->>'classification' = 'confidential' AND p_ctx->'context'->>'ip' = '10.0.0.1')`
+
+- **NOT Operator Example** (Negation):
+  ```json
+  {
+    "op": "not",
+    "conditions": [
+      { "op": "=", "source": "resource", "attr": "deleted", "val": true }
+    ]
+  }
+  ```
+  *Compiled SQL*: `NOT (resource.attributes->>'deleted' = 'true')`
+
+- **NOT_IN Operator Example** (Set Exclusion):
+  ```json
+  { "op": "not_in", "source": "resource", "attr": "status", "val": ["deleted", "archived"] }
+  ```
+  *Compiled SQL*: `NOT (resource.attributes->>'status' = ANY(ARRAY['deleted', 'archived']))`
 
 ### 2.3. Database Partitioning & Sharding Strategy
 To handle massive scale, the system uses **Declarative Table Partitioning**.
@@ -112,7 +129,62 @@ Beyond generic policy checks, the system provides full lifecycle management for 
 > **Note (Upsert Behavior)**: 
 > - **Create Operations** (Single & Batch) behave as **Upserts**. If the entity exists, the system will **Update** the existing record instead of returning a duplicate error.
 
-### 2.11. Public Access Strategy (3-Level Authorization)
+### 2.11. Single-Query Authorization (SearchQuery Integration)
+For applications that need to combine authorization with existing database queries (e.g., search, filtering, pagination), the system provides a **Single-Query Authorization** feature that returns authorization conditions as JSON DSL.
+
+- **Endpoint**: `POST /api/v1/get-authorization-conditions`
+- **Purpose**: Get authorization conditions that can be converted to SQL WHERE clauses and merged with application queries.
+- **Use Case**: "Show me all documents I can access that match my search criteria" - in a single optimized query.
+
+#### How It Works
+1. **Request**: Specify resource type, action, and optional context
+2. **Processing**: 
+   - PostgreSQL function aggregates all applicable ACLs (type-level + resource-level)
+   - Conditions with `source='principal'` or `source='context'` are evaluated server-side
+   - `$context.*` and `$principal.*` references are resolved to actual values
+3. **Response**: Returns one of three filter types:
+   - `granted_all`: User has unconditional access - no filtering needed
+   - `denied_all`: User has no access - reject the query
+   - `conditions`: JSON DSL that must be applied to the query
+
+#### Response Schema
+| Field | Type | Description |
+|-------|------|-------------|
+| `filter_type` | string | `'granted_all'`, `'denied_all'`, or `'conditions'` |
+| `conditions_dsl` | object | JSON condition DSL (only when `filter_type='conditions'`) |
+| `has_context_refs` | boolean | Whether conditions originally had `$context.*` or `$principal.*` references |
+
+#### Condition Evaluation & Simplification
+The system intelligently evaluates and simplifies conditions:
+- **Principal/Context conditions**: Evaluated server-side (e.g., `$principal.department = 'Sales'`)
+- **Resource conditions**: Returned in DSL for database-side evaluation
+- **Short-circuit logic**: AND returns `denied_all` on first false; OR returns `granted_all` on first true
+- **Simplification**: Removes evaluated `true` from AND, `false` from OR
+
+#### Integration with SearchQuery DSL
+The returned `conditions_dsl` is compatible with `search_query_dsl` library:
+```python
+from search_query_dsl import SearchQuery, ABACConditionConverter
+
+# 1. Get authorization conditions
+auth_result = await client.auth.get_authorization_conditions(
+    resource_type_name="Document",
+    action_name="read"
+)
+
+if auth_result.filter_type == "denied_all":
+    return []  # No access
+elif auth_result.filter_type == "granted_all":
+    # Execute query without auth filter
+    results = await execute_query(user_query)
+else:
+    # Convert and merge with user query
+    auth_query = ABACConditionConverter.convert(auth_result.conditions_dsl)
+    merged_query = user_query.merge(auth_query)
+    results = await execute_query(merged_query)
+```
+
+### 2.12. Public Access Strategy (3-Level Authorization)
 The system implements a high-performance **3-Level Waterfall** strategy to handle public vs. private resources efficiently:
 
 1.  **Level 1: Floodgate (Public Flag)**
@@ -307,6 +379,79 @@ curl -X POST "http://localhost:8000/api/v1/check-access" \
       "answer": ["DOC-001"] 
     }
   ]
+}
+```
+
+---
+
+### Get Authorization Conditions Endpoint
+**POST** `/api/v1/get-authorization-conditions`
+
+Returns authorization conditions as JSON DSL for single-query authorization patterns.
+
+#### Request Schema
+| Field | Type | Description |
+|-------|------|-------------|
+| `realm_name` | string | **Required**. The Realm to check against. |
+| `resource_type_name` | string | **Required**. The type of resource (e.g., "Document"). |
+| `action_name` | string | **Required**. The action being performed (e.g., "read"). |
+| `role_names` | array | **Optional**. Override active roles. |
+| `auth_context` | object | **Optional**. Runtime context for `$context.*` resolution. |
+
+#### Curl Example
+```bash
+curl -X POST "http://localhost:8000/api/v1/get-authorization-conditions" \
+  -H "Authorization: Bearer <YOUR_JWT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "realm_name": "DefenseRealm",
+    "resource_type_name": "Document",
+    "action_name": "read",
+    "auth_context": {
+      "ip": "10.0.0.5",
+      "department": "Engineering"
+    }
+  }'
+```
+
+#### Response Examples
+
+**Granted All** (unconditional access):
+```json
+{
+  "filter_type": "granted_all",
+  "conditions_dsl": null,
+  "has_context_refs": false
+}
+```
+
+**Denied All** (no access):
+```json
+{
+  "filter_type": "denied_all",
+  "conditions_dsl": null,
+  "has_context_refs": false
+}
+```
+
+**Conditions** (apply to query):
+```json
+{
+  "filter_type": "conditions",
+  "conditions_dsl": {
+    "op": "or",
+    "conditions": [
+      {
+        "op": "and",
+        "conditions": [
+          { "op": "=", "source": "resource", "attr": "external_id", "val": "DOC-001" },
+          { "op": "=", "source": "resource", "attr": "status", "val": "active" }
+        ]
+      },
+      { "op": "=", "source": "resource", "attr": "classification", "val": "public" }
+    ]
+  },
+  "has_context_refs": true
 }
 ```
 

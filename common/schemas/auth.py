@@ -60,6 +60,7 @@ class GetAuthorizationConditionsRequest(BaseModel):
     resource_type_name: str
     action_name: str
     role_names: Optional[List[str]] = None
+    auth_context: Dict[str, Any] = {}  # Runtime context for $context.* resolution
 
 
 class AuthorizationConditionsResponse(BaseModel):
@@ -71,5 +72,4 @@ class AuthorizationConditionsResponse(BaseModel):
     """
     filter_type: str  # 'granted_all', 'denied_all', 'conditions'
     conditions_dsl: Optional[Dict[str, Any]] = None
-    external_ids: Optional[List[str]] = None
     has_context_refs: bool = False

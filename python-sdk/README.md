@@ -477,6 +477,70 @@ item_resp = await client.auth.check_access(
 )
 ```
 
+### 8. Get Authorization Conditions (Single-Query Authorization)
+For applications that need to combine authorization with existing database queries, use `get_authorization_conditions()` to retrieve authorization conditions as JSON DSL.
+
+```python
+from stateful_abac_sdk.models import AuthorizationConditionsResponse
+
+# Get authorization conditions for a resource type + action
+auth_result = await client.auth.get_authorization_conditions(
+    resource_type_name="documents",
+    action_name="read",
+    auth_context={"department": "Engineering", "ip": "10.0.0.5"}
+)
+
+# Handle the three possible filter types
+if auth_result.filter_type == "denied_all":
+    # User has no access whatsoever
+    print("Access denied")
+    return []
+
+elif auth_result.filter_type == "granted_all":
+    # User has unconditional access - no auth filter needed
+    print("Full access granted")
+    results = await execute_query(user_search_query)
+
+else:  # filter_type == "conditions"
+    # Merge authorization conditions with user's query
+    print(f"Applying conditions: {auth_result.conditions_dsl}")
+    
+    # Convert to SearchQuery and merge (using search_query_dsl library)
+    from search_query_dsl import ABACConditionConverter
+    auth_query = ABACConditionConverter.convert(auth_result.conditions_dsl)
+    merged_query = user_search_query.merge(auth_query)
+    results = await execute_query(merged_query)
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `filter_type` | str | `'granted_all'`, `'denied_all'`, or `'conditions'` |
+| `conditions_dsl` | dict | JSON condition DSL (only when `filter_type='conditions'`) |
+| `has_context_refs` | bool | Whether conditions originally had `$context.*`/`$principal.*` refs |
+
+#### Condition Evaluation
+
+The server automatically:
+- **Resolves references**: `$principal.department` → `"Engineering"`
+- **Evaluates conditions**: `source='principal'` and `source='context'` conditions are evaluated server-side
+- **Simplifies logic**: Removes evaluated `true` from AND, `false` from OR
+- **Short-circuits**: Returns `granted_all` or `denied_all` when all conditions are evaluable
+
+Only `source='resource'` conditions remain in `conditions_dsl` for database-side evaluation.
+
+#### With Role Override
+
+```python
+# Check access as a specific role
+auth_result = await client.auth.get_authorization_conditions(
+    resource_type_name="documents",
+    action_name="read",
+    role_names=["Manager"]  # Only check Manager role access
+)
+```
+
 ## Available Commands API Reference
 
 Below is a summary of the available methods on the `StatefulABACClient` managers. **All operations use the client's realm implicitly** - no `realm_id` argument needed.
@@ -558,6 +622,7 @@ Below is a summary of the available methods on the `StatefulABACClient` managers
 | Method | Description | Arguments | Returns |
 |--------|-------------|-----------|---------|
 | `check_access` | Verify Permissions | `resources`, `auth_context`, `role_names` | `AccessResponse` |
+| `get_authorization_conditions` | Get auth conditions as DSL | `resource_type_name`, `action_name`, `auth_context`, `role_names` | `AuthorizationConditionsResponse` |
 
 ---
 
@@ -668,6 +733,8 @@ json_str = builder.to_json(indent=2)
 | `.gte(val)` | Greater than or equal | `.gte(18)` |
 | `.lte(val)` | Less than or equal | `.lte(65)` |
 | `.is_in(list)` | Value in list | `.is_in(["a", "b"])` |
+| `.not_in(list)` | Value NOT in list | `.not_in(["deleted", "archived"])` |
+| `.all_(list)` | Array contains all values | `.all_(["admin", "moderator"])` |
 | `.dwithin(geom, dist)` | Within distance (meters) | `.dwithin("$context.loc", 5000)` |
 | `.contains(geom)` | Geometry contains | `.contains("$context.loc")` |
 | `.within(geom)` | Within geometry | `.within("$context.zone")` |
@@ -677,6 +744,29 @@ json_str = builder.to_json(indent=2)
 **Logical Operators** (static methods):
 - `ConditionBuilder.and_(c1, c2, ...)` - Logical AND
 - `ConditionBuilder.or_(c1, c2, ...)` - Logical OR
+- `ConditionBuilder.not_(condition)` - Logical NOT (negates a single condition)
+
+**NOT Operator Examples**:
+```python
+# Simple negation - grant access to non-deleted documents
+ConditionBuilder.not_(
+    ConditionBuilder.attr("deleted").eq(True)
+)
+
+# Compound negation - exclude your own drafts
+ConditionBuilder.not_(
+    ConditionBuilder.and_(
+        ConditionBuilder.attr("status").eq("draft"),
+        ConditionBuilder.attr("owner").eq("$principal.username")
+    )
+)
+
+# Combine NOT with other operators
+ConditionBuilder.and_(
+    ConditionBuilder.not_(ConditionBuilder.attr("archived").eq(True)),
+    ConditionBuilder.attr("status").not_in(["deleted", "hidden"])
+)
+```
 
 **Helper Builders** (returned by `add_*` methods):
 

@@ -22,6 +22,7 @@ class Operator(str, Enum):
     # Logical
     AND = "and"
     OR = "or"
+    NOT = "not"
     
     # Spatial
     ST_DWITHIN = "st_dwithin"
@@ -29,6 +30,10 @@ class Operator(str, Enum):
     ST_WITHIN = "st_within"
     ST_INTERSECTS = "st_intersects"
     ST_COVERS = "st_covers"
+    
+    # Set operations
+    NOT_IN = "not_in"
+    ALL = "all"
 
 class ContextAttribute(str, Enum):
     PRINCIPAL_ATTRIBUTES = "principal.attributes"

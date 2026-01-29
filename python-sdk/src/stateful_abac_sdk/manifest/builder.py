@@ -212,6 +212,36 @@ class FluentCondition:
         """
         return self._build(Operator.IN, val)
     
+    def not_in(self, val: List[Any]) -> Dict[str, Any]:
+        """
+        Check if value is NOT in a list.
+        
+        Args:
+            val: List of disallowed values.
+        
+        Returns:
+            Condition dictionary ready for use in ACLs.
+        
+        Example:
+            >>> ConditionBuilder.attr("status").not_in(["deleted", "archived"])
+        """
+        return self._build(Operator.NOT_IN, val)
+    
+    def all_(self, val: List[Any]) -> Dict[str, Any]:
+        """
+        Check if array field contains ALL of the specified values.
+        
+        Args:
+            val: List of values that must all be present.
+        
+        Returns:
+            Condition dictionary ready for use in ACLs.
+        
+        Example:
+            >>> ConditionBuilder.attr("roles").all_(["admin", "moderator"])
+        """
+        return self._build(Operator.ALL, val)
+    
     # Spatial operators
     def dwithin(self, val: Any, distance: float) -> Dict[str, Any]:
         """
@@ -373,6 +403,14 @@ class ConditionBuilder:
     def is_in(self, attr: str, val: List[Any], source: str = Source.RESOURCE) -> Dict[str, Any]:
         """Legacy: Create an in-list condition."""
         return self._make_leaf(Operator.IN, attr, val, source)
+    
+    def not_in(self, attr: str, val: List[Any], source: str = Source.RESOURCE) -> Dict[str, Any]:
+        """Legacy: Create a not-in-list condition."""
+        return self._make_leaf(Operator.NOT_IN, attr, val, source)
+    
+    def all_(self, attr: str, val: List[Any], source: str = Source.RESOURCE) -> Dict[str, Any]:
+        """Legacy: Create an all-of condition (field array contains all values)."""
+        return self._make_leaf(Operator.ALL, attr, val, source)
         
     @staticmethod
     def and_(*conditions: Dict[str, Any]) -> Dict[str, Any]:
@@ -420,6 +458,32 @@ class ConditionBuilder:
         return {
             "op": Operator.OR,
             "conditions": list(conditions)
+        }
+    
+    @staticmethod
+    def not_(condition: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Negate a condition with logical NOT.
+        
+        The condition will be true when the inner condition is false.
+        
+        Args:
+            condition: A single condition dictionary to negate.
+        
+        Returns:
+            Negated condition dictionary.
+        
+        Example:
+            >>> ConditionBuilder.not_(ConditionBuilder.attr("deleted").eq(True))
+            >>> # Can be combined with other operators:
+            >>> ConditionBuilder.and_(
+            ...     ConditionBuilder.attr("status").eq("active"),
+            ...     ConditionBuilder.not_(ConditionBuilder.attr("archived").eq(True))
+            ... )
+        """
+        return {
+            "op": Operator.NOT,
+            "conditions": [condition]
         }
         
     def st_dwithin(self, attr: str, val: Any, distance: float, source: str = Source.RESOURCE) -> Dict[str, Any]:

@@ -141,7 +141,8 @@ async def get_authorization_conditions(
             principal=principal,
             resource_type_name=request.resource_type_name,
             action_name=request.action_name,
-            role_names=request.role_names
+            role_names=request.role_names,
+            auth_context=request.auth_context
         )
         return AuthorizationConditionsResponse(**result)
     except ValueError as e:

@@ -116,8 +116,16 @@ class AuthorizationConditionsResponse(BaseModel):
     
     This can be converted to SearchQuery and merged with user queries
     for single-query authorization using SearchQuery.merge().
+    
+    Key features:
+    - $context.* and $principal.* references are resolved server-side
+    - Evaluable conditions (source='principal'/'context') are pre-evaluated
+    - Resource-level ACLs are merged into conditions_dsl as 
+      (external_id IN [...]) OR (external_id = X AND condition)
+    - If all conditions evaluate to true/false, returns granted_all/denied_all
+    
+    The conditions_dsl is fully simplified and ready for direct conversion.
     """
     filter_type: str  # 'granted_all', 'denied_all', 'conditions'
-    conditions_dsl: Optional[Dict[str, Any]] = None
-    external_ids: Optional[List[str]] = None
-    has_context_refs: bool = False
+    conditions_dsl: Optional[Dict[str, Any]] = None  # Simplified - ready for SearchQuery
+    has_context_refs: bool = False  # True if conditions originally had context refs

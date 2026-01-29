@@ -681,7 +681,8 @@ class AuthService:
         principal: Union[Principal, AnonymousPrincipal],
         resource_type_name: str,
         action_name: str,
-        role_names: List[str] = None
+        role_names: List[str] = None,
+        auth_context: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
         Get authorization conditions as JSON DSL for SearchQuery conversion.
@@ -690,19 +691,24 @@ class AuthService:
         converted to a SearchQuery and merged with user queries using
         SearchQuery.merge() for optimal database performance.
         
+        Context references ($context.* and $principal.*) are resolved before
+        returning, so the conditions_dsl is ready for direct conversion to
+        SearchQuery without additional processing.
+        
         Args:
             realm_name: Name of the realm
             principal: The principal (user) making the request
             resource_type_name: Name of the resource type
             action_name: Action being performed (e.g., "read", "update")
             role_names: Optional role names to filter by
+            auth_context: Runtime context for $context.* resolution
             
         Returns:
             Dict with:
                 - filter_type: 'granted_all', 'denied_all', or 'conditions'
-                - conditions_dsl: JSON condition DSL (or None)
+                - conditions_dsl: JSON condition DSL with resolved context references
                 - external_ids: List of granted resource external IDs (or None)
-                - has_context_refs: Whether conditions reference $context.* or $principal.*
+                - has_context_refs: Whether conditions originally had context references
         """
         # Get Realm Map (cached)
         realm_map = await CacheService.get_realm_map(realm_name, db_session=self.session)
@@ -741,6 +747,9 @@ class AuthService:
         
         principal_id = principal.id if not isinstance(principal, AnonymousPrincipal) else 0
         
+        # Build unified context for reference resolution
+        ctx = build_unified_context(principal, auth_context or {})
+        
         # Call the PostgreSQL function
         query = text("""
             SELECT filter_type, conditions_dsl, external_ids, has_context_refs
@@ -762,13 +771,408 @@ class AuthService:
             return {
                 "filter_type": "denied_all",
                 "conditions_dsl": None,
-                "external_ids": None,
                 "has_context_refs": False
             }
         
+        conditions_dsl = row.conditions_dsl
+        has_context_refs = row.has_context_refs
+        filter_type = row.filter_type
+        
+        # Step 1: Resolve $context.* and $principal.* references in conditions_dsl
+        if conditions_dsl:
+            conditions_dsl = self._resolve_context_references(conditions_dsl, ctx)
+        
+        # Step 2: Evaluate conditions where possible (simplify and short-circuit)
+        if conditions_dsl:
+            evaluated = self._evaluate_conditions(conditions_dsl, ctx)
+            
+            # Check if we got a definitive boolean result
+            if evaluated is True:
+                return {
+                    "filter_type": "granted_all",
+                    "conditions_dsl": None,
+                    "has_context_refs": has_context_refs
+                }
+            elif evaluated is False:
+                return {
+                    "filter_type": "denied_all",
+                    "conditions_dsl": None,
+                    "has_context_refs": has_context_refs
+                }
+            else:
+                # We have a simplified DSL that still needs resource-level evaluation
+                conditions_dsl = evaluated
+        
+        # Step 3: Merge simple external_id = X conditions into IN clauses
+        if conditions_dsl:
+            conditions_dsl = self._merge_external_id_conditions(conditions_dsl)
+        
         return {
-            "filter_type": row.filter_type,
-            "conditions_dsl": row.conditions_dsl,
-            "external_ids": list(row.external_ids) if row.external_ids else None,
-            "has_context_refs": row.has_context_refs
+            "filter_type": filter_type,
+            "conditions_dsl": conditions_dsl,
+            "has_context_refs": has_context_refs
         }
+    
+    def _resolve_context_references(self, node: Any, ctx: Dict[str, Any]) -> Any:
+        """
+        Recursively resolve $context.* and $principal.* references in DSL.
+        
+        Args:
+            node: A DSL node (dict, list, or primitive value)
+            ctx: The unified context with 'principal' and 'context' keys
+            
+        Returns:
+            The node with all references resolved to actual values
+        """
+        if isinstance(node, dict):
+            # Check if this is a leaf condition with a val that needs resolution
+            if 'val' in node:
+                resolved_val = self._resolve_value(node['val'], ctx)
+                return {
+                    **{k: self._resolve_context_references(v, ctx) if k != 'val' else resolved_val
+                       for k, v in node.items()}
+                }
+            # Recurse into nested conditions
+            return {k: self._resolve_context_references(v, ctx) for k, v in node.items()}
+        elif isinstance(node, list):
+            return [self._resolve_context_references(item, ctx) for item in node]
+        else:
+            return node
+    
+    def _resolve_value(self, val: Any, ctx: Dict[str, Any]) -> Any:
+        """
+        Resolve a single value, handling $context.* and $principal.* references.
+        
+        Handles:
+        - String values: "$principal.id" → resolved value
+        - List values: ["$context.region", "static"] → [resolved, "static"]
+        
+        Note: $resource.* references cannot be resolved at query time as they
+        require row-level evaluation. These are left as-is and should trigger
+        a warning or error in the application-side converter.
+        """
+        # Handle list values - resolve each item
+        if isinstance(val, list):
+            return [self._resolve_value(item, ctx) for item in val]
+        
+        if not isinstance(val, str):
+            return val
+        
+        if val.startswith('$context.'):
+            path = val[9:]  # Remove '$context.'
+            return self._get_nested_value(ctx.get('context', {}), path)
+        
+        if val.startswith('$principal.'):
+            path = val[11:]  # Remove '$principal.'
+            return self._get_nested_value(ctx.get('principal', {}), path)
+        
+        # $resource.* references cannot be resolved - they need row-level evaluation
+        # Leave them as-is for the application to handle or reject
+        return val
+    
+    def _get_nested_value(self, obj: Any, path: str) -> Any:
+        """Get a nested value from a dict using dot notation path."""
+        if obj is None:
+            return None
+        parts = path.split('.')
+        current = obj
+        for part in parts:
+            if isinstance(current, dict):
+                current = current.get(part)
+            else:
+                return None
+            if current is None:
+                return None
+        return current
+
+    def _evaluate_conditions(self, node: Any, ctx: Dict[str, Any]) -> Any:
+        """
+        Evaluate conditions where possible, simplifying the DSL.
+        
+        - If source is 'principal' or 'context', we can fully evaluate the condition
+        - If source is 'resource', we cannot evaluate (needs row-level data)
+        - For 'and'/'or', we short-circuit and simplify
+        
+        Returns:
+            - True: The entire condition evaluates to true → granted_all
+            - False: The entire condition evaluates to false → denied_all
+            - Dict: Simplified DSL that still needs resource-level evaluation
+        """
+        if not isinstance(node, dict):
+            return node
+        
+        op = node.get('op', '').lower()
+        
+        # Handle logical operators
+        if op == 'and':
+            return self._evaluate_and(node.get('conditions', []), ctx)
+        elif op == 'or':
+            return self._evaluate_or(node.get('conditions', []), ctx)
+        elif op == 'not':
+            inner = self._evaluate_conditions(node.get('condition', {}), ctx)
+            if inner is True:
+                return False
+            elif inner is False:
+                return True
+            else:
+                return {'op': 'not', 'condition': inner}
+        else:
+            # Leaf condition - try to evaluate
+            return self._evaluate_leaf_condition(node, ctx)
+    
+    def _evaluate_and(self, conditions: List[Dict], ctx: Dict[str, Any]) -> Any:
+        """
+        Evaluate AND conditions with short-circuit logic.
+        - If ANY condition is False, return False
+        - If ALL conditions are True, return True
+        - Otherwise, return simplified AND with unevaluable conditions
+        """
+        remaining = []
+        
+        for cond in conditions:
+            result = self._evaluate_conditions(cond, ctx)
+            
+            if result is False:
+                # Short-circuit: AND with False = False
+                return False
+            elif result is True:
+                # Skip: AND with True doesn't change result
+                continue
+            else:
+                # Unevaluable - keep it
+                remaining.append(result)
+        
+        if not remaining:
+            # All conditions were True
+            return True
+        elif len(remaining) == 1:
+            return remaining[0]
+        else:
+            return {'op': 'and', 'conditions': remaining}
+    
+    def _evaluate_or(self, conditions: List[Dict], ctx: Dict[str, Any]) -> Any:
+        """
+        Evaluate OR conditions with short-circuit logic.
+        - If ANY condition is True, return True
+        - If ALL conditions are False, return False
+        - Otherwise, return simplified OR with unevaluable conditions
+        """
+        remaining = []
+        
+        for cond in conditions:
+            result = self._evaluate_conditions(cond, ctx)
+            
+            if result is True:
+                # Short-circuit: OR with True = True
+                return True
+            elif result is False:
+                # Skip: OR with False doesn't change result
+                continue
+            else:
+                # Unevaluable - keep it
+                remaining.append(result)
+        
+        if not remaining:
+            # All conditions were False
+            return False
+        elif len(remaining) == 1:
+            return remaining[0]
+        else:
+            return {'op': 'or', 'conditions': remaining}
+    
+    def _evaluate_leaf_condition(self, node: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        Evaluate a leaf condition if possible.
+        
+        Conditions with source='principal' or source='context' can be fully evaluated.
+        Conditions with source='resource' cannot be evaluated without the actual row.
+        """
+        source = node.get('source', 'resource')
+        op = node.get('op', '').lower()
+        attr = node.get('attr')
+        val = node.get('val')
+        
+        # Can only evaluate if source is principal or context
+        if source == 'resource':
+            # Cannot evaluate - need actual resource row
+            return node
+        
+        # Get the attribute value from the appropriate context
+        if source == 'principal':
+            attr_value = self._get_nested_value(ctx.get('principal', {}), attr)
+        elif source == 'context':
+            attr_value = self._get_nested_value(ctx.get('context', {}), attr)
+        else:
+            # Unknown source - cannot evaluate
+            return node
+        
+        # Now evaluate the comparison
+        try:
+            result = self._compare_values(op, attr_value, val)
+            return result
+        except Exception:
+            # If comparison fails, return the node as-is
+            return node
+    
+    def _compare_values(self, op: str, left: Any, right: Any) -> bool:
+        """
+        Compare two values using the specified operator.
+        
+        Returns True/False for the comparison result.
+        Raises exception if comparison cannot be performed.
+        """
+        op = op.lower()
+        
+        # Handle None values
+        if left is None:
+            if op == '=' or op == '==':
+                return right is None
+            elif op == '!=' or op == '<>':
+                return right is not None
+            else:
+                # Most comparisons with None are False
+                return False
+        
+        if op in ('=', '=='):
+            return left == right
+        elif op in ('!=', '<>'):
+            return left != right
+        elif op == '<':
+            return left < right
+        elif op == '<=':
+            return left <= right
+        elif op == '>':
+            return left > right
+        elif op == '>=':
+            return left >= right
+        elif op == 'in':
+            if isinstance(right, list):
+                return left in right
+            return False
+        elif op == 'not_in':
+            if isinstance(right, list):
+                return left not in right
+            return True
+        elif op == 'contains':
+            if isinstance(left, (list, str)):
+                return right in left
+            return False
+        elif op == 'starts_with':
+            if isinstance(left, str) and isinstance(right, str):
+                return left.startswith(right)
+            return False
+        elif op == 'ends_with':
+            if isinstance(left, str) and isinstance(right, str):
+                return left.endswith(right)
+            return False
+        elif op == 'is_null':
+            return left is None
+        elif op == 'is_not_null':
+            return left is not None
+        elif op == 'all':
+            # Check if all elements in left list are in right list
+            if isinstance(left, list) and isinstance(right, list):
+                return all(item in right for item in left)
+            elif isinstance(left, list):
+                # left is list, right is single value - all items must equal right
+                return all(item == right for item in left)
+            return False
+        else:
+            # Unknown operator - raise to indicate we can't evaluate
+            raise ValueError(f"Unknown operator: {op}")
+
+    def _merge_external_id_conditions(self, node: Any) -> Any:
+        """
+        Merge multiple simple external_id = X conditions into a single IN clause.
+        
+        This optimizes OR blocks where many conditions are simple equality checks
+        on external_id (from resource-level ACLs) by combining them into a single
+        IN clause for better query performance.
+        
+        Example transformation:
+            OR([external_id = "a", external_id = "b", external_id = "c", other_cond])
+            → OR([external_id IN ["a", "b", "c"], other_cond])
+        """
+        if not isinstance(node, dict):
+            return node
+        
+        op = node.get('op', '').lower()
+        
+        # Recursively process nested structures first
+        if op == 'and':
+            conditions = node.get('conditions', [])
+            merged_conditions = [self._merge_external_id_conditions(c) for c in conditions]
+            if len(merged_conditions) == 1:
+                return merged_conditions[0]
+            return {'op': 'and', 'conditions': merged_conditions}
+        
+        elif op == 'or':
+            conditions = node.get('conditions', [])
+            
+            # Separate simple external_id = X conditions from others
+            external_id_values = []
+            other_conditions = []
+            
+            for cond in conditions:
+                if self._is_simple_external_id_eq(cond):
+                    external_id_values.append(cond.get('val'))
+                else:
+                    # Recursively process non-simple conditions
+                    other_conditions.append(self._merge_external_id_conditions(cond))
+            
+            # Build merged result
+            result_conditions = []
+            
+            # Merge external_id equalities into IN clause if 2 or more
+            if len(external_id_values) >= 2:
+                result_conditions.append({
+                    'op': 'in',
+                    'source': 'resource',
+                    'attr': 'external_id',
+                    'val': external_id_values
+                })
+            elif len(external_id_values) == 1:
+                # Keep single equality as-is
+                result_conditions.append({
+                    'op': '=',
+                    'source': 'resource',
+                    'attr': 'external_id',
+                    'val': external_id_values[0]
+                })
+            
+            result_conditions.extend(other_conditions)
+            
+            if len(result_conditions) == 0:
+                return False  # Empty OR = False
+            elif len(result_conditions) == 1:
+                return result_conditions[0]
+            else:
+                return {'op': 'or', 'conditions': result_conditions}
+        
+        elif op == 'not':
+            inner = self._merge_external_id_conditions(node.get('condition', {}))
+            return {'op': 'not', 'condition': inner}
+        
+        # Leaf condition - return as-is
+        return node
+    
+    def _is_simple_external_id_eq(self, node: Any) -> bool:
+        """
+        Check if a node is a simple external_id = X condition.
+        
+        Returns True for: {"op": "=", "source": "resource", "attr": "external_id", "val": "..."}
+        """
+        if not isinstance(node, dict):
+            return False
+        
+        op = node.get('op', '').lower()
+        source = node.get('source', 'resource')
+        attr = node.get('attr', '')
+        
+        return (
+            op in ('=', '==') and
+            source == 'resource' and
+            attr == 'external_id' and
+            'val' in node and
+            isinstance(node.get('val'), str)  # Simple string value, not a reference
+        )
