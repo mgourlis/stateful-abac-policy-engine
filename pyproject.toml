@@ -38,3 +38,8 @@ pytest-cov = "^7.0.0"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=app --cov=common/src --cov=python-sdk/src --cov-report=term-missing"
