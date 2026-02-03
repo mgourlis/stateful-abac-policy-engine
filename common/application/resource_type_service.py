@@ -15,17 +15,17 @@ class ResourceTypeService:
         await self.session.commit()
         await self.session.refresh(obj)
         
-        # Partitions
-        try:
-            rid = realm_id
-            tid = obj.id
-            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid}_{tid} PARTITION OF resource_{rid} FOR VALUES IN ({tid})"))
-            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid}_{tid} PARTITION OF acl_{rid} FOR VALUES IN ({tid})"))
-            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid}_{tid} PARTITION OF external_ids_{rid} FOR VALUES IN ({tid})"))
-            await self.session.commit()
-        except Exception:
-             # Log warning ideally
-             pass
+        # # Partitions
+        # try:
+        #     rid = realm_id
+        #     tid = obj.id
+        #     await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid}_{tid} PARTITION OF resource_{rid} FOR VALUES IN ({tid})"))
+        #     await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid}_{tid} PARTITION OF acl_{rid} FOR VALUES IN ({tid})"))
+        #     await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid}_{tid} PARTITION OF external_ids_{rid} FOR VALUES IN ({tid})"))
+        #     await self.session.commit()
+        # except Exception:
+        #      # Log warning ideally
+        #      pass
 
         await self._invalidate_realm_cache(realm_id)
         return obj
@@ -58,15 +58,15 @@ class ResourceTypeService:
         if not obj:
             return False
         
-        # Drop Partitions
-        try:
-            rid = realm_id
-            tid = rt_id
-            await self.session.execute(text(f"DROP TABLE IF EXISTS resource_{rid}_{tid} CASCADE"))
-            await self.session.execute(text(f"DROP TABLE IF EXISTS acl_{rid}_{tid} CASCADE"))
-            await self.session.execute(text(f"DROP TABLE IF EXISTS external_ids_{rid}_{tid} CASCADE"))
-        except Exception:
-            pass
+        # # Drop Partitions
+        # try:
+        #     rid = realm_id
+        #     tid = rt_id
+        #     await self.session.execute(text(f"DROP TABLE IF EXISTS resource_{rid}_{tid} CASCADE"))
+        #     await self.session.execute(text(f"DROP TABLE IF EXISTS acl_{rid}_{tid} CASCADE"))
+        #     await self.session.execute(text(f"DROP TABLE IF EXISTS external_ids_{rid}_{tid} CASCADE"))
+        # except Exception:
+        #     pass
 
         await self.session.delete(obj)
         await self.session.commit()
@@ -82,15 +82,15 @@ class ResourceTypeService:
                 obj = ResourceType(**data.model_dump(), realm_id=realm_id)
                 self.session.add(obj)
                 await self.session.flush()
-                # Partitions
-                try:
-                    rid = realm_id
-                    tid = obj.id
-                    await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid}_{tid} PARTITION OF resource_{rid} FOR VALUES IN ({tid})"))
-                    await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid}_{tid} PARTITION OF acl_{rid} FOR VALUES IN ({tid})"))
-                    await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid}_{tid} PARTITION OF external_ids_{rid} FOR VALUES IN ({tid})"))
-                except Exception:
-                    pass
+                # # Partitions
+                # try:
+                #     rid = realm_id
+                #     tid = obj.id
+                #     await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid}_{tid} PARTITION OF resource_{rid} FOR VALUES IN ({tid})"))
+                #     await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid}_{tid} PARTITION OF acl_{rid} FOR VALUES IN ({tid})"))
+                #     await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid}_{tid} PARTITION OF external_ids_{rid} FOR VALUES IN ({tid})"))
+                # except Exception:
+                #     pass
 
         if operation.update:
              for data in operation.update:
