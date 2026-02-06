@@ -42,9 +42,9 @@ async def create_realm_scope(session, realm_name, resource_types=[]):
     parent_acl = f"acl_{safe}_{realm.id}"
     parent_ext = f"external_ids_{safe}"
     
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_res} PARTITION OF resource FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_acl} PARTITION OF acl FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_ext} PARTITION OF external_ids FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_res} PARTITION OF resource FOR VALUES IN ({realm.id})"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_acl} PARTITION OF acl FOR VALUES IN ({realm.id})"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_ext} PARTITION OF external_ids FOR VALUES IN ({realm.id})"))
     
     # Create subpartitions for provided resource types
     type_map = {}
@@ -57,14 +57,10 @@ async def create_realm_scope(session, realm_name, resource_types=[]):
         
         safe_type = rt_name.lower().replace(" ", "_")
         
-        # Subpartitions
-        sub_res = f"{parent_res}_{safe_type}"
-        sub_acl = f"{parent_acl}_{safe_type}"
-        sub_ext = f"{parent_ext}_{safe_type}"
-        
-        await session.execute(text(f"CREATE TABLE IF NOT EXISTS {sub_res} PARTITION OF {parent_res} FOR VALUES IN ({rt.id})"))
-        await session.execute(text(f"CREATE TABLE IF NOT EXISTS {sub_acl} PARTITION OF {parent_acl} FOR VALUES IN ({rt.id})"))
-        await session.execute(text(f"CREATE TABLE IF NOT EXISTS {sub_ext} PARTITION OF {parent_ext} FOR VALUES IN ({rt.id})"))
+        # Sub-partitions removed to match realm-level leaf partition strategy
+        # await session.execute(text(f"CREATE TABLE IF NOT EXISTS {sub_res} PARTITION OF {parent_res} FOR VALUES IN ({rt.id})"))
+        # await session.execute(text(f"CREATE TABLE IF NOT EXISTS {sub_acl} PARTITION OF {parent_acl} FOR VALUES IN ({rt.id})"))
+        # await session.execute(text(f"CREATE TABLE IF NOT EXISTS {sub_ext} PARTITION OF {parent_ext} FOR VALUES IN ({rt.id})"))
 
     await session.commit()
 

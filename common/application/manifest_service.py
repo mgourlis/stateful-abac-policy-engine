@@ -195,9 +195,9 @@ class ManifestService:
             # Create partitions for the new realm
             rid = realm.id
             logger.debug(f"Creating partitions for realm {rid}")
-            await db.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid} PARTITION OF resource FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
-            await db.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid} PARTITION OF acl FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
-            await db.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid} PARTITION OF external_ids FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
+            await db.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid} PARTITION OF resource FOR VALUES IN ({rid})"))
+            await db.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid} PARTITION OF acl FOR VALUES IN ({rid})"))
+            await db.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid} PARTITION OF external_ids FOR VALUES IN ({rid})"))
             
             # Add Keycloak config if provided
             if "keycloak_config" in realm_data:
@@ -236,11 +236,10 @@ class ManifestService:
                     db.add(rt)
                     await db.flush()
                     
-                    # Create sub-partitions for the new resource type
-                    tid = rt.id
-                    await db.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{realm_id}_{tid} PARTITION OF resource_{realm_id} FOR VALUES IN ({tid})"))
-                    await db.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{realm_id}_{tid} PARTITION OF acl_{realm_id} FOR VALUES IN ({tid})"))
-                    await db.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{realm_id}_{tid} PARTITION OF external_ids_{realm_id} FOR VALUES IN ({tid})"))
+                    # tid = rt.id
+                    # await db.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{realm_id}_{tid} PARTITION OF resource_{realm_id} FOR VALUES IN ({tid})"))
+                    # await db.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{realm_id}_{tid} PARTITION OF acl_{realm_id} FOR VALUES IN ({tid})"))
+                    # await db.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{realm_id}_{tid} PARTITION OF external_ids_{realm_id} FOR VALUES IN ({tid})"))
                     
                     existing_rts[rt_name] = rt  # Update cache
                     created += 1

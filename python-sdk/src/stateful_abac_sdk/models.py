@@ -68,6 +68,22 @@ class ACL(BaseEntity):
     role_id: Optional[int] = None
     conditions: Optional[Dict[str, Any]] = None
     compiled_sql: Optional[str] = None
+    
+    # Human-readable names (populated by service)
+    resource_type_name: Optional[str] = None
+    action_name: Optional[str] = None
+    principal_name: Optional[str] = None
+    role_name: Optional[str] = None
+
+class ACLCreateResponse(ACL):
+    """Enriched response for ACL creation/update, including metadata for undo."""
+    status: str = Field(description="'created' or 'updated'")
+    previous_state: Optional[Dict[str, Any]] = Field(None, description="Previous conditions if updated")
+
+class ACLDeleteResponse(BaseModel):
+    """Response for ACL deletion."""
+    deleted: bool
+    acl: Optional[ACL] = None
 
 class CheckAccessItem(BaseModel):
     resource_type_name: str

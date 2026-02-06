@@ -171,9 +171,22 @@ class ACLUpdate(BaseModel):
 class ACLRead(ACLBase):
     id: int
     resource_type_id: int
+    
+    # Human-readable names
+    resource_type_name: Optional[str] = None
+    action_name: Optional[str] = None
+    principal_name: Optional[str] = None
+    role_name: Optional[str] = None
+    resource_external_id: Optional[str] = None
+    
     compiled_sql: Optional[str] = None
     decision: Optional[str] = None # Re-added for backward compatibility/display
     model_config = ConfigDict(from_attributes=True)
+
+class ACLCreateResponse(ACLRead):
+    """Result of an ACL create/update operation."""
+    status: str = Field(description="'created' or 'updated'")
+    previous_state: Optional[Dict[str, Any]] = Field(None, description="Previous conditions if updated")
 
 # --- Batch Operations ---
 # --- Batch Schemas ---

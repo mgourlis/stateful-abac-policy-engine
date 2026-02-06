@@ -3,7 +3,7 @@ DB Manager for ACLModel operations.
 """
 from typing import List, Dict, Any, Optional, Union
 from .base import DBBaseManager
-from ..models import ACL
+from ..models import ACL, ACLCreateResponse, ACLDeleteResponse
 from ..interfaces import IACLManager
 from common.application.acl_service import ACLService
 from common.schemas.realm_api import ACLCreate, ACLUpdate, BatchACLOperation
@@ -26,7 +26,7 @@ class DBACLManager(DBBaseManager, IACLManager):
         action_name: Optional[str] = None,
         principal_name: Optional[str] = None,
         role_name: Optional[str] = None
-    ) -> ACL:
+    ) -> ACLCreateResponse:
         """Create a new ACLModel entry."""
         async with self._db_session.get_session() as session:
             realm_id_int = await self._resolve_realm_id(self.client.realm, session=session)
@@ -61,20 +61,20 @@ class DBACLManager(DBBaseManager, IACLManager):
                 conditions=conditions
             )
             
-            created = await service.create_acl(realm_id_int, acl_create)
-            return self._map_acl(created)
+            created_data = await service.create_acl(realm_id_int, acl_create)
+            return ACLCreateResponse(**created_data)
     
     async def get(self, acl_id: int) -> ACL:
         """Get an ACLModel by ID."""
         async with self._db_session.get_session() as session:
             realm_id_int = await self._resolve_realm_id(self.client.realm, session=session)
             service = ACLService(session)
-            acl = await service.get_acl(realm_id_int, acl_id)
+            acl_data = await service.get_acl(realm_id_int, acl_id)
             
-            if acl is None:
+            if acl_data is None:
                 raise ValueError(f"ACL {acl_id} not found")
             
-            return self._map_acl(acl)
+            return self._map_acl(acl_data)
     
     async def list(
         self, 
@@ -116,9 +116,9 @@ class DBACLManager(DBBaseManager, IACLManager):
                 filters["resource_id"] = resource_id
             
             service = ACLService(session)
-            acls = await service.list_all_acls(realm_id_int, filters=filters)
+            acls_data = await service.list_all_acls(realm_id_int, filters=filters)
             
-            return [self._map_acl(a) for a in acls]
+            return [self._map_acl(a) for a in acls_data]
     
     async def update(
         self, 
@@ -131,12 +131,12 @@ class DBACLManager(DBBaseManager, IACLManager):
             service = ACLService(session)
             
             acl_update = ACLUpdate(conditions=conditions)
-            updated = await service.update_acl(realm_id_int, acl_id, acl_update)
+            updated_data = await service.update_acl(realm_id_int, acl_id, acl_update)
             
-            if updated is None:
+            if updated_data is None:
                 raise ValueError(f"ACL {acl_id} not found")
             
-            return self._map_acl(updated)
+            return self._map_acl(updated_data)
     
     async def delete(self, acl_id: int) -> Dict[str, Any]:
         """Delete an ACLModel."""
@@ -236,16 +236,71 @@ class DBACLManager(DBBaseManager, IACLManager):
                 "deleted": len(delete) if delete else 0
             }
     
-    def _map_acl(self, acl_orm) -> ACL:
-        """Map ORM ACL to SDK ACL model."""
+    async def delete_by_key(
+        self,
+        resource_type_id: Optional[int] = None,
+        action_id: Optional[int] = None,
+        principal_id: Optional[int] = None,
+        role_id: Optional[int] = None,
+        resource_id: Optional[int] = None,
+        resource_external_id: Optional[str] = None,
+        # Name-based alternatives
+        resource_type_name: Optional[str] = None,
+        action_name: Optional[str] = None,
+        principal_name: Optional[str] = None,
+        role_name: Optional[str] = None,
+    ) -> ACLDeleteResponse:
+        """Delete ACL by compound key (not by ID)."""
+        async with self._db_session.get_session() as session:
+            realm_id_int = await self._resolve_realm_id(self.client.realm, session=session)
+            
+            # Resolve IDs from names
+            if resource_type_id is None and resource_type_name:
+                resource_type_id = await self._resolve_resource_type_id(realm_id_int, resource_type_name, session=session)
+            if action_id is None and action_name:
+                action_id = await self._resolve_action_id(realm_id_int, action_name, session=session)
+            if principal_id is None and principal_name:
+                principal_id = await self._resolve_principal_id(realm_id_int, principal_name, session=session)
+            if role_id is None and role_name:
+                role_id = await self._resolve_role_id(realm_id_int, role_name, session=session)
+            
+            # Handle mutual exclusion for principal/role
+            if role_id is not None and role_id != 0:
+                principal_id = None
+            else:
+                principal_id = principal_id if principal_id is not None else 0
+                role_id = None
+            
+            service = ACLService(session)
+            deleted_data = await service.delete_acl_by_key(
+                realm_id=realm_id_int,
+                resource_type_id=resource_type_id,
+                action_id=action_id,
+                principal_id=principal_id,
+                role_id=role_id,
+                resource_id=resource_id,
+                resource_external_id=resource_external_id,
+            )
+            
+            return ACLDeleteResponse(
+                deleted=deleted_data is not None, 
+                acl=self._map_acl(deleted_data) if deleted_data else None
+            )
+    
+    def _map_acl(self, acl_data: Union[Dict[str, Any], Any]) -> ACL:
+        """Map service dictionary or ORM ACL to SDK ACL model."""
+        if isinstance(acl_data, dict):
+            return ACL(**acl_data)
+            
+        # Fallback for ORM objects if any remain
         return ACL(
-            id=acl_orm.id,
-            realm_id=acl_orm.realm_id,
-            resource_type_id=acl_orm.resource_type_id,
-            action_id=acl_orm.action_id,
-            principal_id=acl_orm.principal_id,
-            role_id=acl_orm.role_id,
-            resource_id=acl_orm.resource_id,
-            conditions=acl_orm.conditions,
-            compiled_sql=getattr(acl_orm, 'compiled_sql', None)
+            id=acl_data.id,
+            realm_id=acl_data.realm_id,
+            resource_type_id=acl_data.resource_type_id,
+            action_id=acl_data.action_id,
+            principal_id=acl_data.principal_id,
+            role_id=acl_data.role_id,
+            resource_id=acl_data.resource_id,
+            conditions=acl_data.conditions,
+            compiled_sql=getattr(acl_data, 'compiled_sql', None)
         )

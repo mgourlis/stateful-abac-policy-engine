@@ -106,14 +106,14 @@ async def test_auth_todos(ac: AsyncClient, session):
     await session.execute(text(f"DROP TABLE IF EXISTS {parent_acl} CASCADE"))
     await session.execute(text(f"DROP TABLE IF EXISTS {parent_ext} CASCADE"))
     
-    await session.execute(text(f"CREATE TABLE {parent_res} PARTITION OF resource FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
-    await session.execute(text(f"CREATE TABLE {parent_acl} PARTITION OF acl FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
-    await session.execute(text(f"CREATE TABLE {parent_ext} PARTITION OF external_ids FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
+    await session.execute(text(f"CREATE TABLE {parent_res} PARTITION OF resource FOR VALUES IN ({realm.id})"))
+    await session.execute(text(f"CREATE TABLE {parent_acl} PARTITION OF acl FOR VALUES IN ({realm.id})"))
+    await session.execute(text(f"CREATE TABLE {parent_ext} PARTITION OF external_ids FOR VALUES IN ({realm.id})"))
     
-    # Create subpartitions for Document type
-    await session.execute(text(f"CREATE TABLE {parent_res}_doc PARTITION OF {parent_res} FOR VALUES IN ({rt.id})"))
-    await session.execute(text(f"CREATE TABLE {parent_acl}_doc PARTITION OF {parent_acl} FOR VALUES IN ({rt.id})"))
-    await session.execute(text(f"CREATE TABLE {parent_ext}_doc PARTITION OF {parent_ext} FOR VALUES IN ({rt.id})"))
+    # Sub-partitions removed to match realm-level leaf partition strategy
+    # await session.execute(text(f"CREATE TABLE {parent_res}_doc PARTITION OF {parent_res} FOR VALUES IN ({rt.id})"))
+    # await session.execute(text(f"CREATE TABLE {parent_acl}_doc PARTITION OF {parent_acl} FOR VALUES IN ({rt.id})"))
+    # await session.execute(text(f"CREATE TABLE {parent_ext}_doc PARTITION OF {parent_ext} FOR VALUES IN ({rt.id})"))
     await session.commit()
     
     # Create dummy Principal 0 and Role 0 to satisfy FK/PK if used as wildcard

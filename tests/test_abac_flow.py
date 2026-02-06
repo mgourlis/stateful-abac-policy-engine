@@ -61,14 +61,14 @@ async def test_abac_flow(ac: AsyncClient, session):
     parent_acl = f"acl_{safe_name}_{realm.id}"
     parent_ext = f"external_ids_{safe_name}"
     
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_res} PARTITION OF resource FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_acl} PARTITION OF acl FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_ext} PARTITION OF external_ids FOR VALUES IN ({realm.id}) PARTITION BY LIST (resource_type_id)"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_res} PARTITION OF resource FOR VALUES IN ({realm.id})"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_acl} PARTITION OF acl FOR VALUES IN ({realm.id})"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_ext} PARTITION OF external_ids FOR VALUES IN ({realm.id})"))
     
-    # Create subpartitions for Document type
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_res}_document PARTITION OF {parent_res} FOR VALUES IN ({rt.id})"))
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_acl}_document PARTITION OF {parent_acl} FOR VALUES IN ({rt.id})"))
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_ext}_document PARTITION OF {parent_ext} FOR VALUES IN ({rt.id})"))
+    # Sub-partitions removed to match realm-level leaf partition strategy
+    # await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_res}_document PARTITION OF {parent_res} FOR VALUES IN ({rt.id})"))
+    # await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_acl}_document PARTITION OF {parent_acl} FOR VALUES IN ({rt.id})"))
+    # await session.execute(text(f"CREATE TABLE IF NOT EXISTS {parent_ext}_document PARTITION OF {parent_ext} FOR VALUES IN ({rt.id})"))
     await session.commit()
         
     # ACL Rule: resource.security_level <= principal.level

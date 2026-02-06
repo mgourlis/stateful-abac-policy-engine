@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional, Union
-from ..models import ACL
+from ..models import ACL, ACLCreateResponse, ACLDeleteResponse
 from .base import BaseManager
 from ..interfaces import IACLManager
 
@@ -16,7 +16,7 @@ class ACLManager(BaseManager, IACLManager):
                     resource_type_name: Optional[str] = None,
                     action_name: Optional[str] = None,
                     principal_name: Optional[str] = None,
-                    role_name: Optional[str] = None) -> ACL:
+                    role_name: Optional[str] = None) -> ACLCreateResponse:
         """
         Create an ACL entry.
         Supports resolution by Name OR ID.
@@ -62,7 +62,7 @@ class ACLManager(BaseManager, IACLManager):
             data["conditions"] = conditions
         
         response = await self._post(f"/realms/{realm_id}/acls", json=data)
-        return ACL(**response)
+        return ACLCreateResponse(**response)
 
     async def list(self, 
                   resource_type_id: Optional[int] = None,
@@ -145,3 +145,81 @@ class ACLManager(BaseManager, IACLManager):
         if delete: 
             payload["delete"] = delete
         return await self._post(f"/realms/{realm_id}/acls/batch", json=payload)
+
+    async def delete_by_key(
+        self,
+        resource_type_id: Optional[int] = None,
+        action_id: Optional[int] = None,
+        principal_id: Optional[int] = None,
+        role_id: Optional[int] = None,
+        resource_id: Optional[int] = None,
+        resource_external_id: Optional[str] = None,
+        # Name-based alternatives
+        resource_type_name: Optional[str] = None,
+        action_name: Optional[str] = None,
+        principal_name: Optional[str] = None,
+        role_name: Optional[str] = None,
+    ) -> ACLDeleteResponse:
+        """
+        Delete ACL by compound key (not by ID).
+        
+        Uses list + delete since there's no dedicated endpoint.
+        """
+        realm_id = await self._resolve_realm_id()
+        
+        # Resolve IDs if Names provided
+        if resource_type_id is None and resource_type_name:
+            resource_type_id = await self.client.lookup.get_id(realm_id, "resource_types", resource_type_name)
+            
+        if action_id is None and action_name:
+            action_id = await self.client.lookup.get_id(realm_id, "actions", action_name)
+            
+        if principal_id is None and principal_name:
+            principal_id = await self.client.lookup.get_id(realm_id, "principals", principal_name)
+            
+        if role_id is None and role_name:
+            role_id = await self.client.lookup.get_id(realm_id, "roles", role_name)
+        
+        # Handle resource_external_id by resolving it first
+        if resource_id is None and resource_external_id and resource_type_id:
+            try:
+                # Lookup the resource by external ID
+                resources = await self.client.resources.list(
+                    resource_type_id=resource_type_id,
+                )
+                for r in resources:
+                    if r.external_id == resource_external_id:
+                        resource_id = r.id
+                        break
+            except Exception:
+                # Fallback or log if resolution fails
+                pass
+        
+        # List ACLs matching the criteria
+        params = {}
+        if resource_type_id is not None:
+            params["resource_type_id"] = resource_type_id
+        if action_id is not None:
+            params["action_id"] = action_id
+        if principal_id is not None:
+            params["principal_id"] = principal_id
+        if role_id is not None:
+            params["role_id"] = role_id
+        
+        # Crucial: filter by resource_id (None means type-level)
+        params["resource_id"] = resource_id
+        
+        acls_data = await self._get(f"/realms/{realm_id}/acls/all", params=params)
+        
+        if not acls_data:
+            return ACLDeleteResponse(deleted=False)
+        
+        # Take the first matching ACL
+        # Convert raw dict to ACL model for consistency with self.delete
+        acl = ACL(**acls_data[0]) 
+        success_response = await self.delete(acl.id)
+        
+        return ACLDeleteResponse(
+            deleted=success_response.get("deleted", False),
+            acl=acl
+        )

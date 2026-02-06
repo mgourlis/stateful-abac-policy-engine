@@ -365,7 +365,7 @@ class IACLManager(ABC):
         action_name: Optional[str] = None,
         principal_name: Optional[str] = None,
         role_name: Optional[str] = None
-    ) -> "ACL":
+    ) -> "ACLCreateResponse":
         pass
     
     @abstractmethod
@@ -411,6 +411,45 @@ class IACLManager(ABC):
         delete: Optional[List[Any]] = None
     ) -> Dict[str, Any]:
         pass
+    
+    @abstractmethod
+    async def delete_by_key(
+        self,
+        resource_type_id: Optional[int] = None,
+        action_id: Optional[int] = None,
+        principal_id: Optional[int] = None,
+        role_id: Optional[int] = None,
+        resource_id: Optional[int] = None,
+        resource_external_id: Optional[str] = None,
+        # Name-based alternatives
+        resource_type_name: Optional[str] = None,
+        action_name: Optional[str] = None,
+        principal_name: Optional[str] = None,
+        role_name: Optional[str] = None,
+    ) -> "ACLDeleteResponse":
+        """
+        Delete ACL by compound key (not by ID).
+        
+        Supports both ID-based and name-based resolution.
+        For resource_id, supports either internal ID or external_id.
+        
+        Args:
+            resource_type_id: Resource type internal ID
+            action_id: Action internal ID
+            principal_id: Principal internal ID
+            role_id: Role internal ID
+            resource_id: Resource internal ID
+            resource_external_id: Resource external ID (overrides resource_id)
+            resource_type_name: Resource type name (resolved to ID)
+            action_name: Action name (resolved to ID)
+            principal_name: Principal username (resolved to ID)
+            role_name: Role name (resolved to ID)
+            
+        Returns:
+            ACLDeleteResponse containing deletion status and the deleted ACL data.
+        """
+        pass
+
 
 
 # ============================================================================

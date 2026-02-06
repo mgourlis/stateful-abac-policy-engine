@@ -28,9 +28,9 @@ async def test_public_access_scenarios(ac: AsyncClient, session):
     # Manually create Realm partitions (since we bypassed API)
     rid = realm.id
     from sqlalchemy import text
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid} PARTITION OF resource FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid} PARTITION OF acl FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
-    await session.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid} PARTITION OF external_ids FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid} PARTITION OF resource FOR VALUES IN ({rid})"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid} PARTITION OF acl FOR VALUES IN ({rid})"))
+    await session.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid} PARTITION OF external_ids FOR VALUES IN ({rid})"))
     await session.commit()
     
     # Create Admin

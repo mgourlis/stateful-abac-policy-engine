@@ -57,9 +57,9 @@ class RealmService:
         # Create Partitions
         try:
             rid = realm.id
-            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid} PARTITION OF resource FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
-            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid} PARTITION OF acl FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
-            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid} PARTITION OF external_ids FOR VALUES IN ({rid}) PARTITION BY LIST (resource_type_id)"))
+            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS resource_{rid} PARTITION OF resource FOR VALUES IN ({rid})"))
+            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS acl_{rid} PARTITION OF acl FOR VALUES IN ({rid})"))
+            await self.session.execute(text(f"CREATE TABLE IF NOT EXISTS external_ids_{rid} PARTITION OF external_ids FOR VALUES IN ({rid})"))
             await self.session.commit()
         except Exception as e:
             raise RuntimeError(f"Failed to create realm partitions: {e}")
@@ -137,17 +137,6 @@ class RealmService:
         if not realm:
             return False
         
-        # Delete Resource Types via Service (cleans up their partitions)
-        from .resource_type_service import ResourceTypeService
-        rt_service = ResourceTypeService(self.session)
-        
-        # Get all resource types
-        stmt = select(ResourceType.id).where(ResourceType.realm_id == realm_id)
-        rt_ids = (await self.session.execute(stmt)).scalars().all()
-        
-        for rt_id in rt_ids:
-            await rt_service.delete_resource_type(realm_id, rt_id)
-
         # Drop Partitions
         try:
              await self.session.execute(text(f"DROP TABLE IF EXISTS resource_{realm_id} CASCADE"))
@@ -161,6 +150,17 @@ class RealmService:
         await self.session.execute(delete(ExternalID).where(ExternalID.realm_id == realm_id))
         await self.session.execute(delete(ACL).where(ACL.realm_id == realm_id))
         await self.session.execute(delete(Resource).where(Resource.realm_id == realm_id))
+
+        # Delete Resource Types via Service (cleans up their partitions)
+        from .resource_type_service import ResourceTypeService
+        rt_service = ResourceTypeService(self.session)
+        
+        # Get all resource types
+        stmt = select(ResourceType.id).where(ResourceType.realm_id == realm_id)
+        rt_ids = (await self.session.execute(stmt)).scalars().all()
+        
+        for rt_id in rt_ids:
+            await rt_service.delete_resource_type(realm_id, rt_id)
         
         p_stmt = select(Principal.id).where(Principal.realm_id == realm_id)
         await self.session.execute(delete(PrincipalRoles).where(PrincipalRoles.principal_id.in_(p_stmt)))

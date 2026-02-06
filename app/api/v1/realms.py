@@ -13,7 +13,7 @@ from common.schemas.realm_api import (
     ActionCreate, ActionUpdate, ActionRead,
     ResourceTypeCreate, ResourceTypeUpdate, ResourceTypeRead,
     ResourceCreate, ResourceUpdate, ResourceRead,
-    ACLCreate, ACLUpdate, ACLRead
+    ACLCreate, ACLUpdate, ACLRead, ACLCreateResponse
 )
 
 from common.application.realm_service import RealmService
@@ -393,7 +393,7 @@ async def delete_resource_by_external_id(realm_id: int, type_id_or_name: str, ex
 
 
 # --- ACL Endpoints ---
-@router.post("/realms/{realm_id}/acls", response_model=ACLRead)
+@router.post("/realms/{realm_id}/acls", response_model=ACLCreateResponse)
 async def create_acl(realm_id: int, acl: ACLCreate, db: AsyncSession = Depends(get_db)):
     service = ACLService(db)
     try:
