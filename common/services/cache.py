@@ -9,6 +9,31 @@ from sqlalchemy.orm import selectinload
 logger = logging.getLogger(__name__)
 
 class CacheService:
+
+    # Lua script: atomically populate the realm hash only if the key doesn't exist.
+    # This prevents a concurrent rebuild from overwriting incremental updates.
+    # ARGV[1] = TTL, ARGV[2..N] = field/value pairs.
+    _LUA_POPULATE_IF_ABSENT = """
+    if redis.call('EXISTS', KEYS[1]) == 0 then
+        for i = 2, #ARGV - 1, 2 do
+            redis.call('HSET', KEYS[1], ARGV[i], ARGV[i+1])
+        end
+        redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+        return 1
+    end
+    return 0
+    """
+
+    # Lua script: atomically update type entries only if the hash is fully populated
+    # (indicated by the presence of the '_id' field).
+    _LUA_UPDATE_TYPE_IF_EXISTS = """
+    if redis.call('HEXISTS', KEYS[1], '_id') == 1 then
+        redis.call('HSET', KEYS[1], ARGV[1], ARGV[2], ARGV[3], ARGV[4])
+        return 1
+    end
+    return 0
+    """
+
     @staticmethod
     async def get_realm_map(realm_name: str, db_session: AsyncSession = None) -> dict:
         redis_client = RedisClient.get_instance()
@@ -20,13 +45,6 @@ class CacheService:
             
         # Cache Miss - Populate
         if not db_session:
-             # If no session provided and cache miss, we can't fetch. 
-             # In App context, caller usually handles this or passes session.
-             # Ideally we separate "get from cache" vs "populate cache".
-             # For now, we assume if miss and no session, we fail or return empty?
-             # App implementation used AsyncSessionLocal(). We should avoid creating sessions inside services if possible,
-             # or allow passing a session factory. 
-             # For simpler refactor, we accept an optional session.
              raise ValueError(f"Cache miss for realm '{realm_name}' and no DB session provided for refresh")
 
         async with db_session.begin_nested() if db_session.in_transaction() else db_session:
@@ -63,8 +81,29 @@ class CacheService:
                 mapping[f"role:{role.name}"] = str(role.id)
                 
             if mapping:
-                await redis_client.hset(key, mapping=mapping)
-                await redis_client.expire(key, 3600) 
+                # Atomically populate only if key doesn't exist yet.
+                # This prevents overwriting incremental updates made by
+                # concurrent create/update/delete operations.
+                flat_args = []
+                for k, v in mapping.items():
+                    flat_args.extend([k, v])
+
+                populated = await redis_client.eval(
+                    CacheService._LUA_POPULATE_IF_ABSENT,
+                    1, key,
+                    "3600", *flat_args
+                )
+
+                if not populated:
+                    # Another process populated or incrementally updated the cache
+                    # while we were querying the DB.  Use the existing data.
+                    existing = await redis_client.hgetall(key)
+                    if existing:
+                        return existing
+                    # Key was deleted between our eval and hgetall (very rare).
+                    # Fall back: write our data unconditionally.
+                    await redis_client.hset(key, mapping=mapping)
+                    await redis_client.expire(key, 3600)
             
             return mapping
 
@@ -73,6 +112,42 @@ class CacheService:
         redis_client = RedisClient.get_instance()
         key = f"realm:{realm_name}"
         await redis_client.delete(key)
+
+    @staticmethod
+    async def update_realm_type(
+        realm_name: str,
+        type_name: str,
+        type_id: int,
+        is_public: bool = False,
+    ):
+        """Atomically add or update a single resource type in the cached realm map.
+
+        Uses a Lua script so the update is skipped when the hash has not been
+        fully populated yet (no ``_id`` field), preventing creation of an
+        incomplete cache entry.  If the hash doesn't exist the entry will be
+        included on the next full rebuild triggered by :meth:`get_realm_map`.
+        """
+        redis_client = RedisClient.get_instance()
+        key = f"realm:{realm_name}"
+        await redis_client.eval(
+            CacheService._LUA_UPDATE_TYPE_IF_EXISTS,
+            1,
+            key,
+            f"type:{type_name}",
+            str(type_id),
+            f"type_public:{type_name}",
+            str(is_public).lower(),
+        )
+
+    @staticmethod
+    async def remove_realm_type(realm_name: str, type_name: str):
+        """Remove a single resource type from the cached realm map.
+
+        ``HDEL`` is atomic and a no-op when the key/field doesn't exist.
+        """
+        redis_client = RedisClient.get_instance()
+        key = f"realm:{realm_name}"
+        await redis_client.hdel(key, f"type:{type_name}", f"type_public:{type_name}")
 
     @staticmethod
     def resolve_ids(realm_map: dict, action_name: str, type_name: str):

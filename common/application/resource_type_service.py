@@ -27,7 +27,7 @@ class ResourceTypeService:
         #      # Log warning ideally
         #      pass
 
-        await self._invalidate_realm_cache(realm_id)
+        await self._update_realm_type_cache(realm_id, obj.name, obj.id, obj.is_public)
         return obj
 
     async def get_resource_type(self, realm_id: int, rt_id: int) -> Optional[ResourceType]:
@@ -43,6 +43,7 @@ class ResourceTypeService:
         if not obj:
             return None
         
+        old_name = obj.name
         if rt_in.name is not None:
             obj.name = rt_in.name
         if rt_in.is_public is not None:
@@ -50,7 +51,12 @@ class ResourceTypeService:
             
         await self.session.commit()
         await self.session.refresh(obj)
-        await self._invalidate_realm_cache(realm_id)
+
+        # If renamed, remove the old cache entry first
+        if old_name != obj.name:
+            await self._remove_realm_type_cache(realm_id, old_name)
+
+        await self._update_realm_type_cache(realm_id, obj.name, obj.id, obj.is_public)
         return obj
 
     async def delete_resource_type(self, realm_id: int, rt_id: int) -> bool:
@@ -68,9 +74,10 @@ class ResourceTypeService:
         # except Exception:
         #     pass
 
+        type_name = obj.name
         await self.session.delete(obj)
         await self.session.commit()
-        await self._invalidate_realm_cache(realm_id)
+        await self._remove_realm_type_cache(realm_id, type_name)
         return True
 
     async def batch_resource_types(self, realm_id: int, operation: BatchResourceTypeOperation) -> BatchResourceTypeOperation:
@@ -113,7 +120,34 @@ class ResourceTypeService:
              await self.session.execute(stmt)
 
         await self.session.commit()
+        # Batch operations may have created, updated and deleted types in one
+        # shot.  A full cache invalidation is the safest choice here.
+        await self._invalidate_realm_cache(realm_id)
         return operation
+
+    async def _update_realm_type_cache(
+        self,
+        realm_id: int,
+        type_name: str,
+        type_id: int,
+        is_public: bool = False,
+    ):
+        """Incrementally add/update a resource type in the cached realm map."""
+        realm_service = RealmService(self.session)
+        realm = await realm_service.get_realm(realm_id)
+        if realm:
+            from common.services.cache import CacheService
+            await CacheService.update_realm_type(
+                realm.name, type_name, type_id, is_public
+            )
+
+    async def _remove_realm_type_cache(self, realm_id: int, type_name: str):
+        """Incrementally remove a resource type from the cached realm map."""
+        realm_service = RealmService(self.session)
+        realm = await realm_service.get_realm(realm_id)
+        if realm:
+            from common.services.cache import CacheService
+            await CacheService.remove_realm_type(realm.name, type_name)
 
     async def _invalidate_realm_cache(self, realm_id: int):
          realm_service = RealmService(self.session)
