@@ -213,7 +213,9 @@ The `/check-access` endpoint is optimized for per-request authorization with min
 |-------------|------|-----|
 | **Realm Map** | Action/Type/Role IDs, `is_public` flags | 1 hour |
 | **Principal Cache** | User attributes + role IDs | 1 hour |
+| **Principal Roles** | Role IDs for a principal | 1 hour |
 | **External ID Mapping** | `external_id → resource_id` | 1 hour |
+| **Type Level Decision** | Type-level authorization cache (principal + type + action + roles) | 5 minutes |
 
 ### 3.2. Database Indexes
 
