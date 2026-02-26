@@ -30,12 +30,235 @@ def upgrade() -> None:
     3. Resource-level conditional: resource_id AND conditions (access to specific resource with conditions)
     """
     op.execute("""
+        -- Helper: Extract value from context/principal JSON
+        CREATE OR REPLACE FUNCTION get_value_from_context(p_ctx JSONB, p_path TEXT) 
+        RETURNS TEXT AS $$
+        DECLARE
+            v_parts TEXT[];
+            v_current JSONB;
+            v_key TEXT;
+            i INT;
+        BEGIN
+            -- Path format: $context.tenant or $principal.id
+            -- We assume p_ctx has structure { "context": {...}, "principal": {...} }
+            
+            IF p_path LIKE '$context.%' THEN
+                v_current := p_ctx -> 'context';
+                v_parts := string_to_array(substring(p_path FROM 10), '.');
+            ELSIF p_path LIKE '$principal.%' THEN
+                v_current := p_ctx -> 'principal';
+                v_parts := string_to_array(substring(p_path FROM 12), '.');
+            ELSE
+                RETURN NULL; -- Unknown source or literal
+            END IF;
+            
+            IF v_current IS NULL THEN 
+                RETURN NULL;
+            END IF;
+            
+            FOREACH v_key IN ARRAY v_parts
+            LOOP
+                IF v_current IS NULL OR jsonb_typeof(v_current) != 'object' THEN
+                    RETURN NULL;
+                END IF;
+                v_current := v_current -> v_key;
+            END LOOP;
+            
+            -- Return as text (unquote if string)
+            IF jsonb_typeof(v_current) = 'string' THEN
+                RETURN v_current #>> '{}';
+            ELSIF v_current IS NULL OR jsonb_typeof(v_current) = 'null' THEN
+                RETURN NULL;
+            ELSE
+                RETURN v_current::TEXT;
+            END IF;
+        END;
+        $$ LANGUAGE plpgsql IMMUTABLE;
+
+        -- Helper: Recursively resolve and simplify condition
+        -- Returns: 
+        --   'true'::jsonb  (Granted)
+        --   'false'::jsonb (Denied)
+        --   {...}::jsonb   (Partially resolved condition with substituted values)
+        CREATE OR REPLACE FUNCTION resolve_abac_condition(p_cond JSONB, p_ctx JSONB) 
+        RETURNS JSONB AS $$
+        DECLARE
+            v_op TEXT;
+            v_list JSONB;
+            v_item JSONB;
+            v_res JSONB;
+            v_final_list JSONB[];
+            
+            v_source TEXT;
+            v_attr TEXT;
+            v_val JSONB;
+            
+            v_attr_val TEXT;
+            v_val_resolved TEXT;
+            v_val_is_ref BOOLEAN := FALSE;
+            
+            v_left_val TEXT;
+            v_right_val TEXT;
+            v_left_is_resource BOOLEAN := FALSE;
+            v_right_is_resource BOOLEAN := FALSE;
+            
+            v_subbed_attr TEXT;
+            v_subbed_val JSONB;
+        BEGIN
+            IF p_cond IS NULL OR p_cond = 'null'::jsonb THEN
+                RETURN 'null'::jsonb; 
+            END IF;
+
+            v_op := lower(p_cond ->> 'op');
+            
+            -- Logical Operators
+            IF v_op = 'and' THEN
+                v_list := p_cond -> 'conditions';
+                IF v_list IS NULL OR jsonb_array_length(v_list) = 0 THEN
+                    RETURN 'true'::jsonb;
+                END IF;
+                
+                FOREACH v_item IN ARRAY ARRAY(SELECT jsonb_array_elements(v_list))
+                LOOP
+                    v_res := resolve_abac_condition(v_item, p_ctx);
+                    
+                    IF v_res = 'false'::jsonb THEN
+                        RETURN 'false'::jsonb; -- Short-circuit
+                    ELSIF v_res = 'true'::jsonb OR v_res = 'null'::jsonb THEN
+                        -- Skip 'true' and unknowns? No, 'null' usually implies no-op or valid.
+                        -- If simplify logic: just drop 'true'.
+                        NULL;
+                    ELSE
+                        v_final_list := array_append(v_final_list, v_res);
+                    END IF;
+                END LOOP;
+                
+                IF array_length(v_final_list, 1) IS NULL THEN
+                    RETURN 'true'::jsonb; 
+                ELSIF array_length(v_final_list, 1) = 1 THEN
+                    RETURN v_final_list[1];
+                ELSE
+                    RETURN jsonb_build_object('op', 'and', 'conditions', to_jsonb(v_final_list));
+                END IF;
+
+            ELSIF v_op = 'or' THEN
+                v_list := p_cond -> 'conditions';
+                IF v_list IS NULL OR jsonb_array_length(v_list) = 0 THEN
+                    RETURN 'false'::jsonb;
+                END IF;
+                
+                FOREACH v_item IN ARRAY ARRAY(SELECT jsonb_array_elements(v_list))
+                LOOP
+                    v_res := resolve_abac_condition(v_item, p_ctx);
+                    
+                    IF v_res = 'true'::jsonb THEN
+                        RETURN 'true'::jsonb; -- Short-circuit
+                    ELSIF v_res = 'false'::jsonb THEN
+                        -- Skip 'false'
+                        NULL;
+                    ELSE
+                        v_final_list := array_append(v_final_list, v_res);
+                    END IF;
+                END LOOP;
+                
+                IF array_length(v_final_list, 1) IS NULL THEN
+                    RETURN 'false'::jsonb; 
+                ELSIF array_length(v_final_list, 1) = 1 THEN
+                    RETURN v_final_list[1];
+                ELSE
+                    RETURN jsonb_build_object('op', 'or', 'conditions', to_jsonb(v_final_list));
+                END IF;
+                
+            ELSIF v_op = 'not' THEN
+                v_res := resolve_abac_condition(p_cond -> 'condition', p_ctx);
+                IF v_res = 'true'::jsonb THEN RETURN 'false'::jsonb; END IF;
+                IF v_res = 'false'::jsonb THEN RETURN 'true'::jsonb; END IF;
+                RETURN jsonb_build_object('op', 'not', 'condition', v_res);
+            END IF;
+            
+            -- Leaf Conditions
+            v_source := p_cond ->> 'source';
+            v_attr := p_cond ->> 'attr';
+            v_val := p_cond -> 'val';
+            
+            -- 1. Resolve LHS (Attribute)
+            IF v_source = 'context' THEN
+                v_left_val := get_value_from_context(p_ctx, '$context.' || v_attr);
+                v_subbed_attr := v_left_val; -- For substitution
+            ELSIF v_source = 'principal' THEN
+                v_left_val := get_value_from_context(p_ctx, '$principal.' || v_attr);
+                v_subbed_attr := v_left_val;
+            ELSE 
+                -- Resource or unknown
+                v_left_val := NULL;
+                v_left_is_resource := TRUE;
+            END IF;
+            
+            -- 2. Resolve RHS (Value)
+            IF jsonb_typeof(v_val) = 'string' AND (v_val #>> '{}') LIKE '$%' THEN
+                 v_val_resolved := get_value_from_context(p_ctx, v_val #>> '{}');
+                 IF v_val_resolved IS NULL AND (v_val #>> '{}') LIKE '$resource.%' THEN
+                     v_right_is_resource := TRUE;
+                 ELSE
+                     -- It was a context/principal ref that resolved (or failed to null)
+                     NULL;
+                 END IF;
+                 
+                 IF v_val_resolved IS NOT NULL THEN
+                    v_subbed_val := to_jsonb(v_val_resolved);
+                 ELSE
+                    -- Keep original if resource ref
+                    v_subbed_val := v_val; 
+                 END IF;
+            ELSE
+                 -- Literal
+                 IF jsonb_typeof(v_val) = 'string' THEN
+                    v_val_resolved := v_val #>> '{}';
+                 ELSE
+                    v_val_resolved := v_val::text; -- Basic string conversion for eval
+                 END IF;
+                 v_subbed_val := v_val;
+            END IF;
+
+            -- 3. Evaluate if fully resolvable (NO resource refs)
+            IF NOT v_left_is_resource AND NOT v_right_is_resource THEN
+                -- Both are values available now. Evaluate!
+                IF v_left_val IS NULL OR v_val_resolved IS NULL THEN
+                    -- Special handling for NULLs if needed, or simpl return false
+                    -- But let's check basic equality
+                    IF v_op = 'is_null' THEN RETURN to_jsonb(v_left_val IS NULL); END IF;
+                    IF v_op = 'is_not_null' THEN RETURN to_jsonb(v_left_val IS NOT NULL); END IF;
+                END IF;
+
+                IF v_op = '=' OR v_op = '==' THEN
+                    RETURN to_jsonb(v_left_val = v_val_resolved);
+                ELSIF v_op = '!=' OR v_op = '<>' THEN
+                    RETURN to_jsonb(v_left_val IS DISTINCT FROM v_val_resolved);
+                ELSIF v_op = 'in' THEN
+                     -- v_val is array
+                     RETURN to_jsonb(v_val @> to_jsonb(v_left_val));
+                END IF;
+                
+                -- Fallback for unknown ops: return simplified object
+            END IF;
+            
+            -- 4. Return Substitution Result (Partially Resolved)
+            RETURN jsonb_build_object(
+                'op', p_cond -> 'op',
+                'source', CASE WHEN v_left_is_resource THEN 'resource' ELSE 'static' END,
+                'attr', CASE WHEN v_left_is_resource THEN p_cond -> 'attr' ELSE to_jsonb(v_left_val) END,
+                'val', v_subbed_val
+            );
+        END;
+        $$ LANGUAGE plpgsql IMMUTABLE;
+
         CREATE OR REPLACE FUNCTION get_authorization_conditions(
             p_realm_id INT,
             p_principal_id INT,
             p_role_ids INT[],
             p_resource_type_id INT,
-            p_action_id INT
+            p_action_id INT,
+            p_ctx JSONB default '{}'::jsonb
         )
         RETURNS TABLE(
             filter_type TEXT,
@@ -53,6 +276,7 @@ def upgrade() -> None:
             v_external_ids_condition JSONB;
             v_resource_with_condition JSONB;
             v_has_valid_conditions BOOLEAN;
+            v_res_cond JSONB;
         BEGIN
             -- Check for type-level blanket grant (no conditions, no resource_id)
             -- Note: Check both SQL NULL and JSON null for conditions
@@ -75,8 +299,12 @@ def upgrade() -> None:
             END IF;
             
             -- Collect all grant conditions and resource-level ACLs
+            -- Group by conditions to consolidate identical policies
             FOR v_acl IN
-                SELECT a.conditions, e.external_id
+                SELECT 
+                    a.conditions, 
+                    array_agg(e.external_id) FILTER (WHERE e.external_id IS NOT NULL) as resource_ids,
+                    bool_or(a.resource_id IS NULL) as is_type_level
                 FROM acl a
                 LEFT JOIN external_ids e ON a.resource_id = e.resource_id 
                     AND a.realm_id = e.realm_id 
@@ -88,45 +316,79 @@ def upgrade() -> None:
                       a.principal_id = p_principal_id
                       OR a.role_id = ANY(p_role_ids)
                   )
+                GROUP BY a.conditions
             LOOP
                 -- Check if conditions are valid (not NULL and not JSON null)
                 v_has_valid_conditions := v_acl.conditions IS NOT NULL 
                                           AND v_acl.conditions != 'null'::jsonb;
                 
-                -- Resource-level ACL (specific resource granted)
-                IF v_acl.external_id IS NOT NULL THEN
-                    IF v_has_valid_conditions THEN
-                        -- Resource-level ACL WITH conditions: (external_id = X AND conditions)
-                        v_resource_with_condition := jsonb_build_object(
-                            'op', 'and',
-                            'conditions', jsonb_build_array(
-                                jsonb_build_object(
-                                    'op', '=',
-                                    'source', 'resource',
-                                    'attr', 'external_id',
-                                    'val', v_acl.external_id
-                                ),
-                                v_acl.conditions
-                            )
-                        );
-                        v_conditions := array_append(v_conditions, v_resource_with_condition);
-                        
-                        -- Check for context references in the conditions
-                        IF v_acl.conditions::TEXT ~ '\\$context\\.' 
-                           OR v_acl.conditions::TEXT ~ '\\$principal\\.' THEN
-                            v_has_context_refs := TRUE;
-                        END IF;
-                    ELSE
-                        -- Resource-level ACL without conditions: just add to unconditional list
-                        v_unconditional_external_ids := array_append(v_unconditional_external_ids, v_acl.external_id);
+                -- OPTIMIZATION: Resolve & Simplify
+                -- We try to resolve to TRUE/FALSE or a Simplified Object
+                v_res_cond := NULL;
+                IF v_has_valid_conditions THEN
+                    v_res_cond := resolve_abac_condition(v_acl.conditions, p_ctx);
+                    
+                    IF v_res_cond = 'false'::jsonb THEN
+                        -- Condition failed! Skip this group entirely
+                        CONTINUE;
                     END IF;
-                -- Type-level ACL with conditions (no specific resource)
-                ELSIF v_has_valid_conditions THEN
-                    v_conditions := array_append(v_conditions, v_acl.conditions);
-                    -- Check for context references
-                    IF v_acl.conditions::TEXT ~ '\\$context\\.' 
-                       OR v_acl.conditions::TEXT ~ '\\$principal\\.' THEN
+                END IF;
+
+                IF v_has_valid_conditions AND v_res_cond != 'true'::jsonb THEN
+                    -- Case: Valid condition that is PARTIAL (object)
+                    -- We include the Simplified Condition
+                    
+                    -- Check for context references in the *resolved* version?
+                    -- Usually they are gone now, but keeping flag doesn't hurt.
+                     IF v_res_cond::TEXT ~ '\\$context\\.' 
+                       OR v_res_cond::TEXT ~ '\\$principal\\.' THEN
                         v_has_context_refs := TRUE;
+                    END IF;
+
+                    IF v_acl.is_type_level THEN
+                        v_conditions := array_append(v_conditions, v_res_cond);
+                    ELSE
+                        -- Resource-level ACL WITH conditions
+                        IF array_length(v_acl.resource_ids, 1) > 1 THEN
+                            v_resource_with_condition := jsonb_build_object(
+                                'op', 'and',
+                                'conditions', jsonb_build_array(
+                                    jsonb_build_object(
+                                        'op', 'in',
+                                        'source', 'resource',
+                                        'attr', 'external_id',
+                                        'val', to_jsonb(v_acl.resource_ids)
+                                    ),
+                                    v_res_cond
+                                )
+                            );
+                            v_conditions := array_append(v_conditions, v_resource_with_condition);
+                        ELSIF array_length(v_acl.resource_ids, 1) = 1 THEN
+                             v_resource_with_condition := jsonb_build_object(
+                                'op', 'and',
+                                'conditions', jsonb_build_array(
+                                    jsonb_build_object(
+                                        'op', '=',
+                                        'source', 'resource',
+                                        'attr', 'external_id',
+                                        'val', v_acl.resource_ids[1]
+                                    ),
+                                    v_res_cond
+                                )
+                            );
+                            v_conditions := array_append(v_conditions, v_resource_with_condition);
+                        END IF;
+                    END IF;
+                ELSE
+                    -- Post-Eval is Unconditional (True or No-Op)
+                    
+                    IF v_acl.is_type_level THEN
+                        RETURN QUERY SELECT 'granted_all'::TEXT, NULL::JSONB, NULL::TEXT[], FALSE;
+                        RETURN;
+                    ELSE
+                        IF v_acl.resource_ids IS NOT NULL THEN
+                             v_unconditional_external_ids := COALESCE(v_unconditional_external_ids, ARRAY[]::TEXT[]) || v_acl.resource_ids;
+                        END IF;
                     END IF;
                 END IF;
             END LOOP;
@@ -138,10 +400,9 @@ def upgrade() -> None:
                 RETURN;
             END IF;
             
-            -- Build unified conditions_dsl by merging all conditions
+            -- Build unified conditions_dsl (merged)
             v_final_conditions := v_conditions;
             
-            -- Add unconditional external_ids as IN clause
             IF array_length(v_unconditional_external_ids, 1) > 0 THEN
                 v_external_ids_condition := jsonb_build_object(
                     'op', 'in',
@@ -152,8 +413,6 @@ def upgrade() -> None:
                 v_final_conditions := array_append(v_final_conditions, v_external_ids_condition);
             END IF;
             
-            -- Return unified conditions_dsl (OR of all conditions including external_ids)
-            -- external_ids column is NULL since it's now merged into conditions_dsl
             IF array_length(v_final_conditions, 1) > 1 THEN
                 RETURN QUERY SELECT 
                     'conditions'::TEXT,
@@ -167,7 +426,6 @@ def upgrade() -> None:
                     NULL::TEXT[],
                     v_has_context_refs;
             ELSE
-                -- Should not reach here given the checks above, but handle gracefully
                 RETURN QUERY SELECT 'denied_all'::TEXT, NULL::JSONB, NULL::TEXT[], FALSE;
             END IF;
         END;
