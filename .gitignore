@@ -11,4 +11,6 @@ manifest.json
 load_manifest.py
 test_check_access.py
 
+docs/
+
 
