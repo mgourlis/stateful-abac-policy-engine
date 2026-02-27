@@ -91,14 +91,18 @@ class DBResourceManager(DBBaseManager, IResourceManager):
         async with self._db_session.get_session() as session:
             realm_id_int = await self._resolve_realm_id(self.client.realm, session=session)
             service = ResourceService(session)
-            
-            resource_update = ResourceUpdate(
-                external_id=external_id,
-                attributes=attributes,
-                geometry=geometry,
-                srid=srid
-            )
-            
+
+            update_fields = {}
+            if external_id is not None:
+                update_fields["external_id"] = external_id
+            if attributes is not None:
+                update_fields["attributes"] = attributes
+            if geometry is not None:
+                update_fields["geometry"] = geometry
+            if srid is not None:
+                update_fields["srid"] = srid
+            resource_update = ResourceUpdate(**update_fields)
+
             updated = await service.update_resource(realm_id_int, resource_dto.id, resource_update)
             
             if updated is None:
