@@ -464,10 +464,23 @@ curl -X POST "http://localhost:8000/api/v1/get-authorization-conditions" \
 For programmatic access, a full-featured **async Python SDK** is available with support for both HTTP and direct database modes.
 
 ### Installation
+
+**From PyPI** (when published):
 ```bash
 pip install stateful-abac-sdk
 # or with DB mode support
 pip install stateful-abac-sdk[db]
+```
+
+**From GitHub**:
+```bash
+pip install "stateful-abac-sdk @ git+https://github.com/mgourlis/stateful-abac-policy-engine.git#subdirectory=python-sdk"
+# or with DB mode support
+pip install "stateful-abac-sdk[db] @ git+https://github.com/mgourlis/stateful-abac-policy-engine.git#subdirectory=python-sdk"
+```
+The SDK depends on `stateful-abac-common`, which is installed automatically from the same repo. To install only the common package:
+```bash
+pip install git+https://github.com/mgourlis/stateful-abac-policy-engine.git#subdirectory=common
 ```
 
 ### Quick Example

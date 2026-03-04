@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 db = [
-    "stateful-abac-common",
+    "stateful-abac-common @ git+https://github.com/mgourlis/stateful-abac-policy-engine.git#subdirectory=common",
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "geoalchemy2>=0.14.0",
