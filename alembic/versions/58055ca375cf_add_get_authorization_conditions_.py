@@ -29,8 +29,9 @@ def upgrade() -> None:
     2. Resource-level unconditional: resource_id only, no conditions  
     3. Resource-level conditional: resource_id AND conditions (access to specific resource with conditions)
     """
+    # asyncpg does not allow multiple statements in a single prepared call,
+    # so each CREATE OR REPLACE FUNCTION is executed separately.
     op.execute("""
-        -- Helper: Extract value from context/principal JSON
         CREATE OR REPLACE FUNCTION get_value_from_context(p_ctx JSONB, p_path TEXT) 
         RETURNS TEXT AS $$
         DECLARE
@@ -74,12 +75,10 @@ def upgrade() -> None:
             END IF;
         END;
         $$ LANGUAGE plpgsql IMMUTABLE;
+    """)
 
-        -- Helper: Recursively resolve and simplify condition
-        -- Returns: 
-        --   'true'::jsonb  (Granted)
-        --   'false'::jsonb (Denied)
-        --   {...}::jsonb   (Partially resolved condition with substituted values)
+    # asyncpg: second function in its own execute call
+    op.execute("""
         CREATE OR REPLACE FUNCTION resolve_abac_condition(p_cond JSONB, p_ctx JSONB) 
         RETURNS JSONB AS $$
         DECLARE
@@ -251,7 +250,10 @@ def upgrade() -> None:
             );
         END;
         $$ LANGUAGE plpgsql IMMUTABLE;
+    """)
 
+    # asyncpg: third function in its own execute call
+    op.execute("""
         CREATE OR REPLACE FUNCTION get_authorization_conditions(
             p_realm_id INT,
             p_principal_id INT,
