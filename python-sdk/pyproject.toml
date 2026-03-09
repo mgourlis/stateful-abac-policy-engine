@@ -32,5 +32,8 @@ db = [
     "passlib[bcrypt]>=1.7.4",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/stateful_abac_sdk"]
