@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "stateful-abac-common"
@@ -25,6 +25,15 @@ dependencies = [
     "apscheduler>=3.10.0",
 ]
 
-[tool.hatch.build.targets.wheel]
-# The package is in the current directory (common/), not in a src/ subdirectory
-packages = ["."]
+# The package directory is the parent (..) and the package name is "common"
+# This way, when installed, imports work as `from common.models import ...`
+[tool.setuptools]
+package-dir = {"" = ".."}
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["common"]
+namespaces = false
+
+[tool.setuptools.exclude-package-data]
+"*" = ["build/*", "*.egg-info/*", "__pycache__/*"]
