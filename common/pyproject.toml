@@ -32,8 +32,11 @@ package-dir = {"" = ".."}
 
 [tool.setuptools.packages.find]
 where = [".."]
-include = ["common"]
+include = ["common*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+"common" = ["**/*.py"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["build/*", "*.egg-info/*", "__pycache__/*"]
