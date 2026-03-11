@@ -1,0 +1,12 @@
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.29.0
+geoalchemy2>=0.14.0
+redis>=5.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+shapely>=2.0.0
+pyproj>=3.5.0
+python-keycloak>=3.0.0
+apscheduler>=3.10.0

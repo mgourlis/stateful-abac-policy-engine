@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: stateful-abac-common
+Version: 0.1.0
+Summary: Common utilities and services for Stateful ABAC Policy Engine
+Author-email: Myron Gourlis <myrgourlis@gmail.com>
+Requires-Python: >=3.10
+Requires-Dist: sqlalchemy[asyncio]>=2.0.0
+Requires-Dist: asyncpg>=0.29.0
+Requires-Dist: geoalchemy2>=0.14.0
+Requires-Dist: redis>=5.0.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: pydantic-settings>=2.0.0
+Requires-Dist: python-jose[cryptography]>=3.3.0
+Requires-Dist: passlib[bcrypt]>=1.7.4
+Requires-Dist: shapely>=2.0.0
+Requires-Dist: pyproj>=3.5.0
+Requires-Dist: python-keycloak>=3.0.0
+Requires-Dist: apscheduler>=3.10.0

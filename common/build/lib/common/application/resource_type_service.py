@@ -1,7 +1,6 @@
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from sqlalchemy.exc import IntegrityError
 from common.models import ResourceType
 from common.schemas.realm_api import ResourceTypeCreate, ResourceTypeUpdate, BatchResourceTypeOperation
 from .realm_service import RealmService
@@ -13,19 +12,7 @@ class ResourceTypeService:
     async def create_resource_type(self, realm_id: int, rt_in: ResourceTypeCreate) -> ResourceType:
         obj = ResourceType(**rt_in.model_dump(), realm_id=realm_id)
         self.session.add(obj)
-        try:
-            await self.session.commit()
-        except IntegrityError:
-            await self.session.rollback()
-            # Already exists — return the existing record
-            stmt = select(ResourceType).where(
-                ResourceType.name == rt_in.name, ResourceType.realm_id == realm_id
-            )
-            existing = (await self.session.execute(stmt)).scalar_one_or_none()
-            if existing:
-                await self._update_realm_type_cache(realm_id, existing.name, existing.id, existing.is_public)
-                return existing
-            raise
+        await self.session.commit()
         await self.session.refresh(obj)
 
         await self._update_realm_type_cache(realm_id, obj.name, obj.id, obj.is_public)
