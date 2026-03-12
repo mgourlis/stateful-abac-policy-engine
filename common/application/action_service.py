@@ -1,7 +1,6 @@
 from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from sqlalchemy.exc import IntegrityError
 from common.models import Action
 from common.schemas.realm_api import ActionCreate, ActionUpdate, BatchActionOperation
 from .realm_service import RealmService
@@ -11,20 +10,16 @@ class ActionService:
         self.session = session
 
     async def create_action(self, realm_id: int, action_in: ActionCreate) -> Action:
+        # Check first to avoid exception-based branching after asyncpg aborts the tx
+        existing_stmt = select(Action).where(
+            Action.name == action_in.name, Action.realm_id == realm_id
+        )
+        existing = (await self.session.execute(existing_stmt)).scalar_one_or_none()
+        if existing:
+            return existing
         obj = Action(name=action_in.name, realm_id=realm_id)
         self.session.add(obj)
-        try:
-            await self.session.commit()
-        except IntegrityError:
-            await self.session.rollback()
-            # Already exists — return the existing record
-            stmt = select(Action).where(
-                Action.name == action_in.name, Action.realm_id == realm_id
-            )
-            existing = (await self.session.execute(stmt)).scalar_one_or_none()
-            if existing:
-                return existing
-            raise
+        await self.session.commit()
         await self.session.refresh(obj)
         await self._invalidate_realm_cache(realm_id)
         return obj
