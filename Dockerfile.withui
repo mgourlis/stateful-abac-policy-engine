@@ -35,20 +35,21 @@ COPY common ./common
 # Copy and install auth-sync-tool (CLI for manifest generation)
 COPY auth-sync-tool ./auth-sync-tool
 
+# Copy python-sdk (needed by both init_manifest.py and auth-sync-tool)
+COPY python-sdk ./python-sdk
+
 # Configure poetry to not create virtual env (we're in a container)
 RUN poetry config virtualenvs.create false
 
-# Install dependencies (main + auth-sync-tool)
+# Install dependencies (main + auth-sync-tool + python-sdk)
 RUN poetry install --only main --no-root --no-interaction --no-ansi && \
-    pip install ./auth-sync-tool
+    pip install ./auth-sync-tool && \
+    pip install "./python-sdk[db]"
 
 # Copy application code
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
-
-# Copy python-sdk (needed by init_manifest.py for DBStatefulABACClient)
-COPY python-sdk ./python-sdk
 
 # Copy UI build from first stage
 COPY --from=ui-builder /ui/dist ./ui/dist
