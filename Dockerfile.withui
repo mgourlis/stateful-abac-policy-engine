@@ -47,6 +47,9 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 
+# Copy python-sdk (needed by init_manifest.py for DBStatefulABACClient)
+COPY python-sdk ./python-sdk
+
 # Copy UI build from first stage
 COPY --from=ui-builder /ui/dist ./ui/dist
 
