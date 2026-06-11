@@ -32,11 +32,15 @@ COPY pyproject.toml poetry.lock* ./
 # Copy common package (required for path dependency)
 COPY common ./common
 
+# Copy and install auth-sync-tool (CLI for manifest generation)
+COPY auth-sync-tool ./auth-sync-tool
+
 # Configure poetry to not create virtual env (we're in a container)
 RUN poetry config virtualenvs.create false
 
-# Install dependencies
-RUN poetry install --only main --no-root --no-interaction --no-ansi
+# Install dependencies (main + auth-sync-tool)
+RUN poetry install --only main --no-root --no-interaction --no-ansi && \
+    pip install ./auth-sync-tool
 
 # Copy application code
 COPY app ./app
@@ -49,6 +53,10 @@ COPY --from=ui-builder /ui/dist ./ui/dist
 # Copy and set up entrypoint
 COPY entrypoint.sh ./
 RUN chmod +x entrypoint.sh
+
+# Copy manifest initialization script
+COPY init_manifest.py ./
+RUN chmod +x init_manifest.py
 
 # Enable UI by default in this image
 ENV STATEFUL_ABAC_ENABLE_UI=true

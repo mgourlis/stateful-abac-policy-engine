@@ -62,7 +62,9 @@ async def resolve_principal_from_token(
                     if "_public_key" in realm_map:
                         verify_key = realm_map["_public_key"]
                         if "-----BEGIN PUBLIC KEY-----" not in verify_key:
-                            verify_key = f"-----BEGIN PUBLIC KEY-----\n{verify_key}\n-----END PUBLIC KEY-----"
+                            # Format base64 with 64-char line breaks (required PEM structure)
+                            wrapped = "\n".join(verify_key[i:i+64] for i in range(0, len(verify_key), 64))
+                            verify_key = f"-----BEGIN PUBLIC KEY-----\n{wrapped}\n-----END PUBLIC KEY-----"
                     
                     if "_algorithm" in realm_map:
                         verify_algo = realm_map["_algorithm"]
@@ -82,20 +84,23 @@ async def resolve_principal_from_token(
                 except ValueError:
                     pass
             
-            if sub:
+            # Use preferred_username if available (Keycloak standard claim)
+            username = payload.get("preferred_username") or sub
+            
+            if sub or username:
                 # Try lookup from cache
                 principal_data = None
                 
-                # Use preferred_username if available (Keycloak standard claim)
-                username = payload.get("preferred_username") or sub
-                
                 try:
-                    principal_id = int(sub)
-                    principal_data = await CacheService.get_principal(principal_id=principal_id, db_session=db)
+                    if sub:
+                        principal_id = int(sub)
+                        principal_data = await CacheService.get_principal(principal_id=principal_id, db_session=db)
                 except ValueError:
-                    # sub is not an ID - use preferred_username or sub as username
-                    if realm_id:
-                        principal_data = await CacheService.get_principal(username=username, realm_id=realm_id, db_session=db)
+                    pass
+                
+                # Fall back to username lookup (also handles sub=None case)
+                if not principal_data and username and realm_id:
+                    principal_data = await CacheService.get_principal(username=username, realm_id=realm_id, db_session=db)
                 
                 if principal_data:
                     # Extract roles from token - check multiple sources:
@@ -121,7 +126,11 @@ async def resolve_principal_from_token(
                     
                     return CachedPrincipal(principal_data)
                     
-        except (JWTError, ValueError):
-            pass
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "JWT verification/lookup failed: %s: %s (realm=%s)",
+                type(e).__name__, e, realm_context
+            )
             
     return AnonymousPrincipal()

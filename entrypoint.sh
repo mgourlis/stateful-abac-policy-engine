@@ -13,5 +13,14 @@ echo "Running Alembic migrations..."
 alembic upgrade head
 echo "Migrations complete!"
 
+# ── Initialize realm from sync config (if present) ──────────────────────────
+if [ -f /app/sync_config.yaml ]; then
+    echo "sync_config.yaml found — initializing realm via DB mode..."
+    python3 /app/init_manifest.py
+else
+    echo "No sync_config.yaml — skipping manifest initialization."
+fi
+# ────────────────────────────────────────────────────────────────────────────
+
 echo "Starting application..."
 exec "$@"
