@@ -12,7 +12,11 @@ from ..db_managers import (
 from common.application.manifest_service import ManifestService
 from common.core.database import AsyncSessionLocal
 from common.worker import SchedulerWorker
-from common.core.config import settings
+from common.core.config import Config as BaseConfig
+from ..config import SDKConfig
+
+# Use SDKConfig which extends BaseConfig with Keycloak properties
+settings = SDKConfig()
 
 logger = logging.getLogger(__name__)
 
