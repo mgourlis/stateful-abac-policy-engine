@@ -44,7 +44,7 @@ RUN poetry config virtualenvs.create false
 # Install dependencies (main + auth-sync-tool + python-sdk)
 RUN poetry install --only main --no-root --no-interaction --no-ansi && \
     pip install ./auth-sync-tool && \
-    pip install "./python-sdk[db]"
+    pip install './python-sdk[db]'
 
 # Copy application code
 COPY app ./app
