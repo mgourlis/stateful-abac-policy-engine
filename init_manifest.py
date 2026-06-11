@@ -172,7 +172,7 @@ async def apply_manifest(manifest_path: Path) -> bool:
     client = DBStatefulABACClient(realm=REALM)
 
     try:
-        await client.connect()
+        await client.connect(token="")
         logger.info("Applying manifest to realm '%s' (mode=replace)...", REALM)
         result = await client.apply_manifest(str(manifest_path), mode="replace")
         logger.info("Manifest applied successfully!")
