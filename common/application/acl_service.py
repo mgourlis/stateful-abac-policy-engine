@@ -4,6 +4,7 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.orm import joinedload
 from common.models import ACL, ExternalID, ResourceType, Action, Principal, AuthRole, Resource
 from common.schemas.realm_api import ACLCreate, ACLUpdate, BatchACLOperation, ACLRead
+from common.services.cache import CacheService
 
 class ACLService:
     def __init__(self, session: AsyncSession):
@@ -44,6 +45,9 @@ class ACLService:
                 await self.session.commit()
                 await self.session.refresh(existing)
             
+            await CacheService.invalidate_type_decisions_for_type(
+                realm_id, acl_in.resource_type_id
+            )
             return {
                 **await self._map_acl_to_dict(existing),
                 "previous_state": previous_state,
@@ -55,6 +59,9 @@ class ACLService:
         await self.session.commit()
         await self.session.refresh(obj)
         
+        await CacheService.invalidate_type_decisions_for_type(
+            realm_id, acl_in.resource_type_id
+        )
         return {
             **await self._map_acl_to_dict(obj),
             "previous_state": None,
@@ -170,6 +177,9 @@ class ACLService:
             obj.conditions = acl_in.conditions
         await self.session.commit()
         await self.session.refresh(obj)
+        await CacheService.invalidate_type_decisions_for_type(
+            realm_id, obj.resource_type_id
+        )
         return await self._map_acl_to_dict(obj)
 
     async def delete_acl(self, realm_id: int, acl_id: int) -> bool:
@@ -177,8 +187,12 @@ class ACLService:
         obj = (await self.session.execute(stmt)).scalar_one_or_none()
         if not obj:
             return False
+        resource_type_id = obj.resource_type_id
         await self.session.delete(obj)
         await self.session.commit()
+        await CacheService.invalidate_type_decisions_for_type(
+            realm_id, resource_type_id
+        )
         return True
 
     async def batch_acls(self, realm_id: int, operation: BatchACLOperation) -> BatchACLOperation:
@@ -245,6 +259,15 @@ class ACLService:
                  await self.session.execute(stmt)
 
         await self.session.commit()
+        # Collect all unique (realm_id, resource_type_id) pairs affected
+        affected_types: set[tuple[int, int]] = set()
+        for data_list in (operation.create or [], operation.update or [], operation.delete or []):
+            for data in data_list:
+                affected_types.add((realm_id, data.resource_type_id))
+        for realm_id_val, type_id_val in affected_types:
+            await CacheService.invalidate_type_decisions_for_type(
+                realm_id_val, type_id_val
+            )
         return operation
 
     async def _resolve_external(self, realm_id: int, rt_id: int, ext_id: str) -> Optional[ExternalID]:
@@ -295,4 +318,7 @@ class ACLService:
         
         await self.session.delete(acl_obj)
         await self.session.commit()
+        await CacheService.invalidate_type_decisions_for_type(
+            realm_id, resource_type_id
+        )
         return acl_data
