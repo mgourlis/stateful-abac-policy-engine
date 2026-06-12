@@ -340,10 +340,9 @@ def upgrade() -> None:
                     -- Case: Valid condition that is PARTIAL (object)
                     -- We include the Simplified Condition
                     
-                    -- Check for context references in the *resolved* version?
-                    -- Usually they are gone now, but keeping flag doesn't hurt.
-                     IF v_res_cond::TEXT ~ '\\$context\\.' 
-                       OR v_res_cond::TEXT ~ '\\$principal\\.' THEN
+                    -- Check ORIGINAL conditions for context references (before resolution)
+                     IF v_acl.conditions::TEXT LIKE '%$context.%' 
+                       OR v_acl.conditions::TEXT LIKE '%$principal.%' THEN
                         v_has_context_refs := TRUE;
                     END IF;
 
