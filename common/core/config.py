@@ -51,4 +51,22 @@ class Config:
         """Enable serving the React UI from /ui/dist if it exists."""
         return os.getenv("STATEFUL_ABAC_ENABLE_UI", "false").lower() == "true"
 
+    @property
+    def ROOT_PATH(self) -> str:
+        """Deployment sub-path prefix for the app (e.g. '/policy-engine').
+
+        Supports two deployment modes from a single setting:
+          * Reverse proxy (Nginx/Apache): the prefix is advertised to OpenAPI
+            (correct docs/SDK URLs) while requests still route at /api/v1/...
+            whether or not the proxy strips the prefix.
+          * Standalone: the app is directly reachable at /ROOT_PATH/api/v1/...
+
+        Empty string (default) keeps the current root-mounted behaviour.
+        A leading '/' is enforced and any trailing '/' is stripped.
+        """
+        val = os.getenv("STATEFUL_ABAC_ROOT_PATH", "").strip()
+        if val and not val.startswith("/"):
+            val = "/" + val
+        return val.rstrip("/")
+
 settings = Config()

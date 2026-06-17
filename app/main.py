@@ -70,6 +70,10 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=tags_metadata,
     lifespan=lifespan,
+    # root_path makes the app reachable at both /api/v1/... (proxy strips prefix)
+    # and /ROOT_PATH/api/v1/... (standalone / proxy preserves prefix), and advertises
+    # the prefix to OpenAPI/Swagger so docs and the SDK generate correct URLs.
+    root_path=settings.ROOT_PATH,
     docs_url="/docs",
     redoc_url="/redoc"
 )

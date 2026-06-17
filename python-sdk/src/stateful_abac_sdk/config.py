@@ -13,10 +13,14 @@ class SDKConfig(BaseConfig):
     def MODE(self) -> str:
         """Client mode: 'http' or 'db'."""
         return os.getenv("STATEFUL_ABAC_CLIENT_MODE", "http")
-    
+
     @property
     def BASE_URL(self) -> Optional[str]:
-        """Base URL for HTTP mode."""
+        """Base URL for HTTP mode.
+
+        Include any deployment sub-path prefix here, e.g.
+        ``http://host/policy-engine/api/v1`` when the app is served under a root_path.
+        """
         return os.getenv("STATEFUL_ABAC_CLIENT_BASE_URL")
 
     @property
