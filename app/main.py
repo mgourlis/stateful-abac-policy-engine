@@ -104,6 +104,21 @@ if settings.ENABLE_UI:
             if os.path.isfile(file_path):
                 return FileResponse(file_path)
             return FileResponse(os.path.join(ui_dist_path, "index.html"))
+    else:
+        # ENABLE_UI is on but the UI was never built (ui/dist missing).
+        # Register a fallback root so "/" doesn't 404, and warn loudly.
+        logging.warning(
+            "STATEFUL_ABAC_ENABLE_UI=true but UI bundle not found at %s. "
+            "Build the UI (cd ui && npm run build) or set STATEFUL_ABAC_ENABLE_UI=false.",
+            ui_dist_path,
+        )
+
+        @app.get("/")
+        async def root():
+            return {
+                "message": "Stateful ABAC Policy Engine Running",
+                "warning": "ENABLE_UI is true but ui/dist was not found.",
+            }
 else:
     @app.get("/")
     async def root():

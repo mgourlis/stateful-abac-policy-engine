@@ -1,6 +1,9 @@
 // API Client for Stateful ABAC Policy Engine
 
-const BASE_URL = '/api/v1';
+// import.meta.env.BASE_URL is set by Vite from the `base` config (e.g. '/policy-engine/'),
+// so API calls respect the same deployment sub-path as the UI assets.
+// When served at root, BASE_URL is '/' and this collapses to '/api/v1'.
+const BASE_URL = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/v1`;
 
 class ApiError extends Error {
     status: number;

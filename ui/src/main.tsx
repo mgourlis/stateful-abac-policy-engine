@@ -16,10 +16,15 @@ const queryClient = new QueryClient({
   },
 })
 
+// Derive the router basename from Vite's BASE_URL so client-side routing also
+// lives under the deployment sub-path (e.g. '/policy-engine'). When served at
+// the root, BASE_URL is '/' and basename becomes '/' (no change).
+const routerBasename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={routerBasename}>
         <ToastProvider>
           <App />
         </ToastProvider>

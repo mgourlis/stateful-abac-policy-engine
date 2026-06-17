@@ -1,6 +1,13 @@
 import os
 from typing import Optional
 
+from dotenv import load_dotenv
+
+# Load .env once when the config module is first imported.
+# override=False so real environment variables (e.g. Docker-injected ones) always win
+# over .env values. When there is no .env (e.g. inside a container) this is a no-op.
+load_dotenv(override=False)
+
 class Config:
     @property
     def REDIS_URL(self) -> str:

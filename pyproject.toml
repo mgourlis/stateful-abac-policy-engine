@@ -14,6 +14,7 @@ sqlalchemy = "^2.0.45"
 asyncpg = "^0.31.0"
 geoalchemy2 = "^0.18.1"
 pydantic-settings = "^2.12.0"
+python-dotenv = "^1.0.0"
 redis = "^7.1.0"
 alembic = "^1.17.2"
 python-jose = {extras = ["cryptography"], version = "^3.5.0"}

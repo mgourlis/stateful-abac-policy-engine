@@ -4,19 +4,35 @@ from logging.config import fileConfig
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 from common.models import Base
+# Importing config triggers load_dotenv() (see common/core/config.py), so that
+# STATEFUL_ABAC_DATABASE_URL from a local .env is visible to os.getenv() below
+# when running `alembic` directly (outside Docker Compose).
+import common.core.config  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override sqlalchemy.url from environment variable if present
-# This allows Docker to provide the correct connection string
-if os.getenv("STATEFUL_ABAC_DATABASE_URL"):
-    config.set_main_option("sqlalchemy.url", os.getenv("STATEFUL_ABAC_DATABASE_URL"))
+# Resolve the database URL directly from the environment (preferred), falling back
+# to the value in alembic.ini. We intentionally do NOT store it back into the alembic
+# config via config.set_main_option(), because alembic uses Python's configparser
+# whose '%' interpolation chokes on URL-encoded passwords (e.g. '%21', '%40').
+DATABASE_URL = os.getenv("STATEFUL_ABAC_DATABASE_URL") or config.get_main_option(
+    "sqlalchemy.url"
+)
+
+# Fail fast with a clear message if no URL is configured anywhere.
+if not DATABASE_URL:
+    raise RuntimeError(
+        "No database URL configured. Set the STATEFUL_ABAC_DATABASE_URL environment "
+        "variable, e.g.\n"
+        "  export STATEFUL_ABAC_DATABASE_URL="
+        "'postgresql+asyncpg://postgres:PASSWORD@HOST:5432/DB'"
+    )
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -45,7 +61,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = DATABASE_URL
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -70,11 +86,7 @@ async def run_async_migrations() -> None:
 
     """
 
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_async_engine(DATABASE_URL, poolclass=pool.NullPool)
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
