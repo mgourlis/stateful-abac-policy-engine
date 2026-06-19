@@ -3,13 +3,7 @@ Manifest generator using stateful-abac-sdk ManifestBuilder.
 """
 
 import sys
-from pathlib import Path
 from typing import Dict, Any, List, Optional
-
-# Add SDK to path for development
-SDK_PATH = Path(__file__).parent.parent.parent.parent.parent.parent / "python-sdk" / "src"
-if SDK_PATH.exists():
-    sys.path.insert(0, str(SDK_PATH))
 
 from stateful_abac_sdk.manifest.builder import ManifestBuilder
 
